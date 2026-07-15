@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexus Pest Control — Portal</title>
+<style>
+:root{
+  --navy:#0c2647; --navy-2:#123563; --green:#1c8c43; --green-2:#166e35;
+  --bg:#f4f6f9; --card:#ffffff; --border:#e2e6ec; --text:#1b2430; --muted:#66707d;
+  --amber:#b8791b; --amber-bg:#fdf3e1; --red:#b8332a; --red-bg:#fbe9e7;
+  --blue-bg:#e8f0fd; --green-bg:#e8f7ec;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+.app{max-width:1100px;margin:0 auto;padding:16px 14px 60px;}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px;flex-wrap:wrap;}
+.brand{display:flex;align-items:center;gap:10px;}
+.brand svg{width:44px;height:38px;flex:none;}
+.brand-text .name{font-weight:800;font-size:19px;letter-spacing:0.3px;color:var(--navy);line-height:1;}
+.brand-text .name span{color:var(--green);}
+.brand-text .tag{font-size:10px;letter-spacing:2.5px;color:var(--green-2);font-weight:700;margin-top:3px;}
+nav.tabs{display:flex;gap:6px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:5px;margin-bottom:18px;flex-wrap:wrap;position:sticky;top:8px;z-index:5;}
+nav.tabs button{border:0;background:transparent;padding:9px 14px;border-radius:9px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;}
+nav.tabs button.active{background:var(--navy);color:#fff;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:16px;}
+.card h2{margin:0 0 4px;font-size:16px;color:var(--navy);}
+.card .sub{color:var(--muted);font-size:12.5px;margin-bottom:14px;}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px;}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;}
+.stat .n{font-size:22px;font-weight:800;color:var(--navy);}
+.stat .l{font-size:11.5px;color:var(--muted);margin-top:2px;}
+table{width:100%;border-collapse:collapse;font-size:12.5px;}
+th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.3px;padding:8px 8px;border-bottom:1px solid var(--border);}
+td{padding:9px 8px;border-bottom:1px solid var(--border);vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+tr.job-row{cursor:pointer;}
+tr.job-row:hover{background:#f9fafc;}
+.badge{display:inline-block;padding:3px 10px;border-radius:99px;font-size:10.5px;font-weight:700;letter-spacing:0.3px;}
+.badge.Quoted{background:var(--blue-bg);color:#1d4f9c;}
+.badge.Scheduled{background:var(--amber-bg);color:var(--amber);}
+.badge.Completed{background:#f1eafd;color:#6a3ec9;}
+.badge.Closed{background:var(--green-bg);color:var(--green-2);}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--navy);background:var(--navy);color:#fff;padding:10px 16px;border-radius:9px;font-size:13.5px;font-weight:600;cursor:pointer;}
+.btn:hover{background:var(--navy-2);}
+.btn.green{background:var(--green);border-color:var(--green);}
+.btn.green:hover{background:var(--green-2);}
+.btn.outline{background:transparent;color:var(--navy);}
+.btn.subtle{background:var(--bg);color:var(--text);border-color:var(--border);}
+.btn:disabled{opacity:0.5;cursor:not-allowed;}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+label{display:block;font-size:12.5px;font-weight:600;color:var(--navy);margin-bottom:5px;}
+input[type=text],input[type=email],input[type=tel],input[type=number],input[type=date],select,textarea{
+  width:100%;padding:10px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;background:#fff;color:var(--text);
+}
+textarea{resize:vertical;min-height:70px;}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.field{margin-bottom:12px;}
+@media(max-width:640px){.grid2{grid-template-columns:1fr;} nav.tabs{position:static;}}
+.pest-pills{display:flex;flex-wrap:wrap;gap:7px;}
+.pest-pill{border:1px solid var(--border);padding:7px 12px;border-radius:99px;font-size:12.5px;cursor:pointer;user-select:none;background:#fff;}
+.pest-pill.sel{background:var(--navy);color:#fff;border-color:var(--navy);}
+.line-items{width:100%;border-collapse:collapse;margin-top:6px;}
+.line-items td{padding:6px 4px;}
+.line-items input{padding:8px 8px;font-size:13.5px;}
+.li-remove{background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;line-height:1;}
+.totals{margin-left:auto;max-width:280px;font-size:13.5px;}
+.totals div{display:flex;justify-content:space-between;padding:5px 0;}
+.totals .grand{font-weight:800;font-size:16px;color:var(--navy);border-top:1px solid var(--border);margin-top:4px;padding-top:8px;}
+.quote-preview{border:1px dashed var(--border);border-radius:12px;padding:18px;background:#fcfdfe;overflow-x:auto;}
+.qp-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid var(--navy);padding-bottom:14px;margin-bottom:16px;gap:10px;flex-wrap:wrap;}
+.qp-terms{font-size:11.5px;color:var(--muted);line-height:1.6;margin-top:18px;border-top:1px solid var(--border);padding-top:14px;}
+.qp-terms h4{color:var(--navy);font-size:12.5px;margin:10px 0 3px;}
+.qp-terms p{margin:0 0 6px;}
+.empty{color:var(--muted);font-size:13.5px;padding:20px 0;text-align:center;}
+.modal-bg{position:fixed;inset:0;background:rgba(10,20,35,0.5);display:flex;align-items:flex-start;justify-content:center;padding:16px 10px;overflow:auto;z-index:50;}
+.modal{background:#fff;border-radius:16px;max-width:880px;width:100%;padding:18px;margin-bottom:40px;}
+.modal-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:8px;}
+.modal-head h2{margin:0;color:var(--navy);font-size:17px;}
+.close-x{background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted);}
+.stepper{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;}
+.step{flex:1;min-width:90px;text-align:center;padding:8px 6px;border-radius:8px;font-size:11px;font-weight:700;background:var(--bg);color:var(--muted);}
+.step.done{background:var(--green-bg);color:var(--green-2);}
+.step.current{background:var(--navy);color:#fff;}
+.photo-grid{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;}
+.photo-grid .ph{position:relative;width:92px;height:92px;border-radius:10px;overflow:hidden;border:1px solid var(--border);background:#f0f0f0;}
+.photo-grid .ph img{width:100%;height:100%;object-fit:cover;display:block;}
+.photo-grid .ph button{position:absolute;top:3px;right:3px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;line-height:1;}
+.upload-box{border:2px dashed var(--border);border-radius:10px;text-align:center;font-size:12px;color:var(--muted);cursor:pointer;width:92px;height:92px;display:flex;align-items:center;justify-content:center;}
+.upload-box:hover{border-color:var(--green);color:var(--green-2);}
+.pay-methods{display:flex;gap:8px;flex-wrap:wrap;}
+.pay-methods label.opt{flex:1;min-width:90px;border:1px solid var(--border);border-radius:10px;padding:11px 8px;display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;font-size:13px;}
+.pay-methods input[type=radio]{width:auto;}
+.pay-methods label.opt.sel{border-color:var(--green);background:var(--green-bg);}
+.notice{font-size:12px;padding:9px 12px;border-radius:8px;margin-bottom:10px;}
+.notice.blue{background:var(--blue-bg);color:#1d4f9c;}
+.notice.green{background:var(--green-bg);color:var(--green-2);}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:11px 20px;border-radius:10px;font-size:13.5px;z-index:100;box-shadow:0 6px 20px rgba(0,0,0,0.2);max-width:90vw;text-align:center;}
+.small{font-size:12px;color:var(--muted);}
+.spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,0.4);border-top-color:#fff;border-radius:50%;animation:spin 0.7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.loading-screen{display:flex;align-items:center;justify-content:center;height:70vh;color:var(--muted);font-size:14px;}
+.cb-grid{display:flex;flex-wrap:wrap;gap:8px 18px;}
+.cb-item{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;color:var(--text);cursor:pointer;}
+.cb-item input{width:auto;margin:0;}
+.sr-section-title{font-weight:700;color:var(--navy);font-size:12px;text-transform:uppercase;letter-spacing:0.4px;margin:20px 0 10px;padding-top:14px;border-top:1px solid var(--border);}
+.sr-section-title:first-of-type{border-top:none;padding-top:0;margin-top:4px;}
+</style>
+</head>
+<body>
+<div class="app" id="app"><div class="loading-screen">Loading Nexus Pest Control portal…</div></div>
+
+<script>
+/* ---------------- Server call wrapper ----------------
+   Talks to the Python/Flask backend at /api on this same origin. */
+const API_URL = "/api";
+
+async function call(fnName, ...args){
+  const url = API_URL + "?action=" + encodeURIComponent(fnName) + "&payload=" + encodeURIComponent(JSON.stringify(args));
+  const res = await fetch(url);
+  const json = await res.json();
+  if(json.error) throw new Error(json.error);
+  return json.result;
+}
+
+async function callPost(fnName, args){
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ action: fnName, payload: args })
+  });
+  const json = await res.json();
+  if(json.error) throw new Error(json.error);
+  return json.result;
+}
+
+/* ---------------- State ---------------- */
+let state = { settings: null, jobs: [] };
+let ui = { tab:"dashboard", openJobId:null, quoteDraft:null, toast:null, busy:false };
+
+function blankDraft(){
+  return { customer:{name:"",phone:"",email:"",address:""}, serviceTypes:[], lineItems:[{desc:"",qty:1,price:0}], notes:"" };
+}
+ui.quoteDraft = blankDraft();
+
+function money(n){ return "$" + (Number(n)||0).toLocaleString("en-CA",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtDate(iso){ if(!iso) return "—"; const d = new Date(iso); return d.toLocaleDateString("en-CA",{year:"numeric",month:"short",day:"numeric"}); }
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function esc(s){ return (s||"").toString().replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function calcTotals(lineItems, taxRate){
+  const subtotal = lineItems.reduce((s,li)=> s + (Number(li.qty)||0)*(Number(li.price)||0), 0);
+  const tax = subtotal * (Number(taxRate)||0)/100;
+  return { subtotal, tax, total: subtotal+tax };
+}
+function showToast(msg){ ui.toast = msg; render(); setTimeout(()=>{ ui.toast=null; render(); }, 3400); }
+
+function defaultTerms(s){
+  return [
+    ["Quote Validity", `This quote is valid for ${s.quoteValidityDays} days from the date of issue. Final pricing may be adjusted following an on-site inspection if conditions differ from those described by the customer.`],
+    ["Service Guarantee", `If target pest activity persists between scheduled treatments within ${s.warrantyDays} days of service, ${s.companyName} will return to re-treat the affected area at no additional charge. This guarantee covers control of the pests listed on this quote; it does not guarantee that pests will never return to the property.`],
+    ["Licensing & Products", `${s.licenseNote}. All products used are registered with Health Canada's Pest Management Regulatory Agency (PMRA) and are applied strictly according to label directions.`],
+    ["Access & Preparation", `Customer is responsible for providing safe, clear access to all treatment areas and for completing any preparation instructions provided by the technician.`],
+    ["Cancellation & Missed Appointments", `Appointments may be rescheduled or cancelled free of charge with at least 24 hours' notice. Cancellations with less than 24 hours' notice, or a missed appointment due to lack of access, may be subject to a trip charge of ${money(s.tripFee)}.`],
+    ["Payment Terms", `Payment is due upon completion of service unless other arrangements have been agreed to in writing. We accept cash, debit, credit card, and e-transfer.`],
+    ["Health & Safety", `Keep children, pets, and food items away from treated areas until products have fully dried or as instructed by the technician.`],
+    ["Liability", `${s.companyName} is not responsible for pre-existing damage caused by pest activity prior to treatment. Our liability for direct damages is limited to the amount paid for the applicable service.`],
+    ["Photos & Records", `Before/after photos may be taken during service to document treatment and included in your service report.`],
+    ["Acceptance", `Approval of this quote (by reply, signature, or payment of a deposit) constitutes acceptance of the terms above.`],
+  ];
+}
+
+/* ---------------- Init ---------------- */
+async function init(){
+  try{
+    const data = await call("getBootstrap");
+    state.settings = data.settings;
+    state.jobs = data.jobs;
+  }catch(err){
+    document.getElementById("app").innerHTML = `<div class="loading-screen">Could not load portal data: ${esc(err.message||err)}</div>`;
+    return;
+  }
+  render();
+}
+
+async function refreshJobs(){
+  state.jobs = await call("getJobs");
+}
+
+/* ---------------- Photo compression ---------------- */
+function fileToCompressedBase64(file, maxDim, quality){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = e=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let w = img.width, h = img.height;
+        if(w > h && w > maxDim){ h = Math.round(h*maxDim/w); w = maxDim; }
+        else if(h >= w && h > maxDim){ w = Math.round(w*maxDim/h); h = maxDim; }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img,0,0,w,h);
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        resolve(dataUrl.split(",")[1]);
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ---------------- Render shell ---------------- */
+function render(){
+  const app = document.getElementById("app");
+  app.innerHTML = `
+    ${renderTopbar()}
+    ${renderNav()}
+    <div id="tabroot">${renderTab()}</div>
+    ${ui.openJobId ? renderJobModal(state.jobs.find(j=>j.id===ui.openJobId)) : ""}
+    ${ui.toast ? `<div class="toast">${esc(ui.toast)}</div>` : ""}
+  `;
+  bindEvents();
+}
+
+function renderTopbar(){
+  return `
+  <div class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 100 84" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="50,4 96,40 96,40 84,40 50,14 16,40 4,40" fill="#0c2647"/>
+        <polygon points="50,4 96,40 84,40 50,14" fill="#1c8c43"/>
+        <rect x="16" y="40" width="8" height="30" fill="#0c2647"/>
+        <rect x="76" y="40" width="8" height="30" fill="#1c8c43"/>
+        <rect x="40" y="30" width="8" height="8" fill="#0c2647"/><rect x="52" y="30" width="8" height="8" fill="#0c2647"/>
+        <rect x="40" y="40" width="8" height="8" fill="#0c2647"/><rect x="52" y="40" width="8" height="8" fill="#0c2647"/>
+      </svg>
+      <div class="brand-text">
+        <div class="name">NEXUS <span>PEST</span> CONTROL</div>
+        <div class="tag">SERVICE PORTAL</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderNav(){
+  const tabs = [["dashboard","Dashboard"],["quote","New Quote"],["jobs","Jobs"],["settings","Settings"]];
+  return `<nav class="tabs">${tabs.map(([id,label])=>`<button data-tab="${id}" class="${ui.tab===id?'active':''}">${label}</button>`).join("")}</nav>`;
+}
+
+function renderTab(){
+  if(ui.tab==="dashboard") return renderDashboard();
+  if(ui.tab==="quote") return renderQuoteForm();
+  if(ui.tab==="jobs") return renderJobsList();
+  if(ui.tab==="settings") return renderSettings();
+  return "";
+}
+
+/* ---------------- Dashboard ---------------- */
+function renderDashboard(){
+  const jobs = state.jobs;
+  const countBy = st => jobs.filter(j=>j.status===st).length;
+  const revenue = jobs.filter(j=>j.status==="Closed").reduce((s,j)=> s + (j.payment ? Number(j.payment.amount)||0 : 0), 0);
+  const recent = jobs.slice(0,8);
+  return `
+  <div class="stat-grid">
+    <div class="stat"><div class="n">${countBy("Quoted")}</div><div class="l">Open Quotes</div></div>
+    <div class="stat"><div class="n">${countBy("Scheduled")}</div><div class="l">Scheduled Jobs</div></div>
+    <div class="stat"><div class="n">${countBy("Completed")}</div><div class="l">Awaiting Payment</div></div>
+    <div class="stat"><div class="n">${countBy("Closed")}</div><div class="l">Closed / Paid</div></div>
+    <div class="stat"><div class="n">${money(revenue)}</div><div class="l">Revenue Collected</div></div>
+  </div>
+  <div class="card">
+    <h2>Recent Activity</h2>
+    <div class="sub">Latest quotes and jobs across the portal</div>
+    ${recent.length===0 ? `<div class="empty">No jobs yet. Start with <strong>New Quote</strong>.</div>` : renderJobsTable(recent)}
+  </div>`;
+}
+
+function renderJobsTable(jobs){
+  return `<div style="overflow-x:auto;"><table>
+    <thead><tr><th>Customer</th><th>Location</th><th>Service</th><th>Total</th><th>Status</th><th>Created</th></tr></thead>
+    <tbody>
+      ${jobs.map(j=>{
+        const t = calcTotals(j.lineItems, state.settings.taxRate);
+        return `<tr class="job-row" data-open="${j.id}">
+          <td><strong>${esc(j.customer.name)}</strong></td>
+          <td>${esc(j.customer.address)}</td>
+          <td>${esc(j.serviceTypes.join(", "))}</td>
+          <td>${money(t.total)}</td>
+          <td><span class="badge ${j.status}">${j.status}</span></td>
+          <td>${fmtDate(j.createdAt)}</td>
+        </tr>`;
+      }).join("")}
+    </tbody>
+  </table></div>`;
+}
+
+function renderJobsList(){
+  const jobs = state.jobs;
+  return `
+  <div class="card">
+    <h2>All Jobs</h2>
+    <div class="sub">Tap a row to view the quote, upload service photos, send the report, or close the case.</div>
+    ${jobs.length===0 ? `<div class="empty">No jobs yet.</div>` : renderJobsTable(jobs)}
+  </div>`;
+}
+
+/* ---------------- New Quote form ---------------- */
+const PEST_OPTIONS = ["General Pest Control","Ants","Rodents (Mice/Rats)","Bed Bugs","Wasps & Hornets","Spiders","Cockroaches","Termites","Wildlife","Fleas","Other"];
+
+function renderQuoteForm(){
+  const d = ui.quoteDraft;
+  const s = state.settings;
+  const totals = calcTotals(d.lineItems, s.taxRate);
+  return `
+  <div class="card">
+    <h2>Create a Quote</h2>
+    <div class="sub">Enter customer & service details, then preview and email the quote.</div>
+    <div class="grid2">
+      <div class="field"><label>Customer Name</label><input type="text" id="qc-name" value="${esc(d.customer.name)}" placeholder="Jane Smith"></div>
+      <div class="field"><label>Phone</label><input type="tel" id="qc-phone" value="${esc(d.customer.phone)}" placeholder="(519) 555-0123"></div>
+      <div class="field"><label>Customer Email</label><input type="email" id="qc-email" value="${esc(d.customer.email)}" placeholder="jane@email.com"></div>
+      <div class="field"><label>Service Location / Address</label><input type="text" id="qc-address" value="${esc(d.customer.address)}" placeholder="123 Main St, Owen Sound, ON"></div>
+    </div>
+    <div class="field">
+      <label>Service Type(s)</label>
+      <div class="pest-pills">${PEST_OPTIONS.map(p=>`<div class="pest-pill ${d.serviceTypes.includes(p)?'sel':''}" data-pest="${esc(p)}">${esc(p)}</div>`).join("")}</div>
+    </div>
+    <div class="field"><label>Scope of Work / Notes</label><textarea id="qc-notes" placeholder="e.g. Exterior perimeter treatment + interior crack & crevice for ants.">${esc(d.notes)}</textarea></div>
+    <label>Line Items</label>
+    <table class="line-items">
+      <thead><tr><th style="width:45%">Description</th><th>Qty</th><th>Unit Price</th><th>Amount</th><th></th></tr></thead>
+      <tbody>
+        ${d.lineItems.map((li,i)=>`<tr>
+          <td><input type="text" data-li="${i}" data-f="desc" value="${esc(li.desc)}" placeholder="e.g. General pest control treatment"></td>
+          <td><input type="number" min="0" step="1" data-li="${i}" data-f="qty" value="${li.qty}" style="width:64px"></td>
+          <td><input type="number" min="0" step="0.01" data-li="${i}" data-f="price" value="${li.price}" style="width:90px"></td>
+          <td>${money((li.qty||0)*(li.price||0))}</td>
+          <td>${d.lineItems.length>1 ? `<button class="li-remove" data-remove-li="${i}">✕</button>` : ""}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>
+    <div class="btn-row"><button class="btn subtle" id="add-li">+ Add line item</button></div>
+    <div class="totals" style="margin-top:14px;">
+      <div><span>Subtotal</span><strong>${money(totals.subtotal)}</strong></div>
+      <div><span>HST (${s.taxRate}%)</span><strong>${money(totals.tax)}</strong></div>
+      <div class="grand"><span>Total</span><span>${money(totals.total)}</span></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn green" id="save-quote">Save Quote</button>
+      <button class="btn outline" id="reset-quote">Clear Form</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Quote Preview</h2>
+    <div class="sub">This is what the customer will see, including terms &amp; conditions.</div>
+    ${renderQuotePreview(d, s, totals)}
+  </div>`;
+}
+
+function renderQuotePreview(d, s, totals){
+  const terms = defaultTerms(s);
+  return `<div class="quote-preview">
+    <div class="qp-head">
+      <div>
+        <div style="font-weight:800;font-size:18px;color:var(--navy);">${esc(s.companyName)}</div>
+        <div class="small">${esc(s.address)} &bull; ${esc(s.phone)} &bull; ${esc(s.fromEmail)}</div>
+        <div class="small">${esc(s.licenseNote)}</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-weight:700;color:var(--green-2);">QUOTE</div>
+        <div class="small">Date: ${fmtDate(todayISO())}</div>
+        <div class="small">Valid ${s.quoteValidityDays} days</div>
+      </div>
+    </div>
+    <div class="grid2">
+      <div><div class="small">BILL TO</div><div><strong>${esc(d.customer.name)||"—"}</strong></div><div class="small">${esc(d.customer.address)||"—"}</div><div class="small">${esc(d.customer.phone)||""} ${d.customer.email?(' &bull; '+esc(d.customer.email)):''}</div></div>
+      <div><div class="small">SERVICE</div><div><strong>${esc(d.serviceTypes.join(", "))||"—"}</strong></div></div>
+    </div>
+    ${d.notes ? `<p class="small" style="margin-top:12px;"><strong>Scope:</strong> ${esc(d.notes)}</p>` : ""}
+    <div style="overflow-x:auto;"><table class="line-items" style="margin-top:14px;">
+      <thead><tr><th>Description</th><th>Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Amount</th></tr></thead>
+      <tbody>${d.lineItems.map(li=>`<tr><td>${esc(li.desc)||"—"}</td><td>${li.qty}</td><td style="text-align:right">${money(li.price)}</td><td style="text-align:right">${money((li.qty||0)*(li.price||0))}</td></tr>`).join("")}</tbody>
+    </table></div>
+    <div class="totals">
+      <div><span>Subtotal</span><strong>${money(totals.subtotal)}</strong></div>
+      <div><span>HST (${s.taxRate}%)</span><strong>${money(totals.tax)}</strong></div>
+      <div class="grand"><span>Total</span><span>${money(totals.total)}</span></div>
+    </div>
+    <div class="qp-terms">
+      <strong style="color:var(--navy);font-size:13px;">Terms &amp; Conditions</strong>
+      ${terms.map(([t,b])=>`<h4>${esc(t)}</h4><p>${esc(b)}</p>`).join("")}
+    </div>
+  </div>`;
+}
+
+/* ---------------- Job detail modal ---------------- */
+function renderJobModal(job){
+  if(!job) return "";
+  const s = state.settings;
+  const totals = calcTotals(job.lineItems, s.taxRate);
+  const steps = ["Quoted","Scheduled","Completed","Closed"];
+  const curIdx = steps.indexOf(job.status);
+  return `<div class="modal-bg" id="modal-bg">
+    <div class="modal">
+      <div class="modal-head">
+        <div><h2>${esc(job.customer.name)}</h2><div class="small">${esc(job.customer.address)} &bull; ${esc(job.serviceTypes.join(", "))}</div></div>
+        <button class="close-x" id="close-modal">✕</button>
+      </div>
+      <div class="stepper">${steps.map((st,i)=>`<div class="step ${i<curIdx?'done':''} ${i===curIdx?'current':''}">${st}</div>`).join("")}</div>
+      <div class="card" style="margin-bottom:14px;">
+        <h2 style="font-size:15px;">Quote Summary</h2>
+        <table><tbody>
+          <tr><td class="small">Customer</td><td>${esc(job.customer.name)} — ${esc(job.customer.phone)} ${job.customer.email?('— '+esc(job.customer.email)):''}</td></tr>
+          <tr><td class="small">Location</td><td>${esc(job.customer.address)}</td></tr>
+          <tr><td class="small">Service</td><td>${esc(job.serviceTypes.join(", "))}</td></tr>
+          <tr><td class="small">Total (incl. HST)</td><td><strong>${money(totals.total)}</strong></td></tr>
+          <tr><td class="small">Created</td><td>${fmtDate(job.createdAt)}</td></tr>
+        </tbody></table>
+        <div class="btn-row">
+          ${job.status==="Quoted" ? `<button class="btn green" id="send-quote-email">Email Quote to Customer</button>` : ""}
+          ${job.status==="Quoted" ? `<button class="btn subtle" id="mark-scheduled">Mark Scheduled</button>` : ""}
+          ${job.status==="Scheduled" ? `<button class="btn subtle" id="mark-completed">Mark Completed</button>` : ""}
+        </div>
+        ${job.status==="Scheduled" ? `<div class="field" style="margin-top:10px;max-width:220px;"><label>Scheduled Date</label><input type="date" id="scheduled-date" value="${job.scheduledDate||todayISO()}"></div>` : ""}
+        ${job.quoteSentAt ? `<div class="notice green" style="margin-top:10px;">Quote emailed on ${fmtDate(job.quoteSentAt)}.</div>` : ""}
+      </div>
+      ${(job.status==="Completed" || job.status==="Closed") ? renderServiceReportSection(job) : ""}
+      ${(job.status==="Completed" || job.status==="Closed") ? renderPaymentSection(job, totals) : ""}
+    </div>
+  </div>`;
+}
+
+function defaultServiceReport(){
+  return {
+    propertyType:"", dateOfService: todayISO(), timeIn:"", timeOut:"",
+    technicianName:"", technicianLicense:"",
+    serviceType:"", serviceTypeOther:"",
+    pestType:"", infestationLevel:"", areasAffected:"",
+    evidence:{livePests:false,deadPests:false,droppings:false,nesting:false,damage:false,tracks:false,other:false,otherText:""},
+    contributingConditions:{food:false,water:false,clutter:false,cracks:false,openings:false,sanitation:false,other:false,otherText:""},
+    treatmentMethod:"",
+    products:[{name:"",activeIngredient:"",pcpNumber:"",amountUsed:"",location:""}],
+    targetPest:"", applicationEquipment:"",
+    applicationMethod:{spray:false,gelBait:false,dust:false,baitStation:false,trap:false,fumigation:false,other:false,otherText:""},
+    areasTreated:"",
+    recommendations:"", followUpRequired:"No", followUpDate:"",
+    generalComments:"",
+    technicianDeclaration:{name:"",signature:"",date:todayISO()},
+    clientAcknowledgment:{name:"",signature:"",date:""}
+  };
+}
+function ensureServiceReport(job){
+  if(!job.serviceReport) job.serviceReport = defaultServiceReport();
+  if(!job.serviceReport.products || !job.serviceReport.products.length) job.serviceReport.products = [{name:"",activeIngredient:"",pcpNumber:"",amountUsed:"",location:""}];
+  if(!job.serviceReport.evidence) job.serviceReport.evidence = defaultServiceReport().evidence;
+  if(!job.serviceReport.contributingConditions) job.serviceReport.contributingConditions = defaultServiceReport().contributingConditions;
+  if(!job.serviceReport.applicationMethod) job.serviceReport.applicationMethod = defaultServiceReport().applicationMethod;
+  if(!job.serviceReport.technicianDeclaration) job.serviceReport.technicianDeclaration = {name:"",signature:"",date:todayISO()};
+  if(!job.serviceReport.clientAcknowledgment) job.serviceReport.clientAcknowledgment = {name:"",signature:"",date:""};
+  return job.serviceReport;
+}
+function srRadio(name, value, label, selected){
+  return `<label class="cb-item"><input type="radio" name="${name}" value="${esc(value)}" ${selected===value?"checked":""}> ${esc(label)}</label>`;
+}
+function srCheckbox(id, checked, label){
+  return `<label class="cb-item"><input type="checkbox" id="${id}" ${checked?"checked":""}> ${esc(label)}</label>`;
+}
+
+function renderServiceReportSection(job){
+  const r = ensureServiceReport(job);
+  const photos = job.photos||[];
+  const products = r.products;
+  return `<div class="card" style="margin-bottom:14px;">
+    <h2 style="font-size:15px;">Pest Control Service Report</h2>
+    <div class="sub">Full inspection/treatment report — saved to this job and included in the emailed report.</div>
+
+    <div class="sr-section-title">Service Details</div>
+    <div class="grid2">
+      <div class="field"><label>Date of Inspection/Service</label><input type="date" id="sr-date" value="${esc(r.dateOfService||todayISO())}"></div>
+      <div class="field"><label>Technician Name</label><input type="text" id="sr-tech-name" value="${esc(r.technicianName)}"></div>
+      <div class="field"><label>Time In</label><input type="time" id="sr-time-in" value="${esc(r.timeIn)}"></div>
+      <div class="field"><label>Time Out</label><input type="time" id="sr-time-out" value="${esc(r.timeOut)}"></div>
+      <div class="field"><label>Technician License/Certification No.</label><input type="text" id="sr-tech-license" value="${esc(r.technicianLicense)}"></div>
+      <div class="field"><label>Property Type</label>
+        <div class="cb-grid">${["Residential","Commercial","Industrial"].map(o=>srRadio("srPropertyType",o,o,r.propertyType)).join("")}</div>
+      </div>
+    </div>
+    <div class="field"><label>Type of Service</label>
+      <div class="cb-grid">${["Initial Inspection","Routine Service","Follow-up Visit","Emergency Call","Other"].map(o=>srRadio("srServiceType",o,o,r.serviceType)).join("")}</div>
+      <input type="text" id="sr-service-type-other" value="${esc(r.serviceTypeOther)}" placeholder="If Other, describe" style="margin-top:6px;">
+    </div>
+
+    <div class="sr-section-title">Pest Identified</div>
+    <div class="grid2">
+      <div class="field"><label>Pest Type</label><input type="text" id="sr-pest-type" value="${esc(r.pestType)}"></div>
+      <div class="field"><label>Level of Infestation</label>
+        <div class="cb-grid">${["Low","Moderate","Heavy"].map(o=>srRadio("srInfestation",o,o,r.infestationLevel)).join("")}</div>
+      </div>
+    </div>
+    <div class="field"><label>Areas Affected</label><textarea id="sr-areas-affected">${esc(r.areasAffected)}</textarea></div>
+
+    <div class="sr-section-title">Observation Information</div>
+    <div class="field"><label>Evidence of Pest Activity</label>
+      <div class="cb-grid">
+        ${srCheckbox("sr-ev-live", r.evidence.livePests, "Live pests")}
+        ${srCheckbox("sr-ev-dead", r.evidence.deadPests, "Dead pests")}
+        ${srCheckbox("sr-ev-droppings", r.evidence.droppings, "Droppings")}
+        ${srCheckbox("sr-ev-nesting", r.evidence.nesting, "Nesting materials")}
+        ${srCheckbox("sr-ev-damage", r.evidence.damage, "Damage to property")}
+        ${srCheckbox("sr-ev-tracks", r.evidence.tracks, "Tracks or smear marks")}
+        ${srCheckbox("sr-ev-other", r.evidence.other, "Other")}
+      </div>
+      <input type="text" id="sr-ev-other-text" value="${esc(r.evidence.otherText)}" placeholder="If Other, describe" style="margin-top:6px;">
+    </div>
+    <div class="field"><label>Contributing Conditions</label>
+      <div class="cb-grid">
+        ${srCheckbox("sr-cc-food", r.contributingConditions.food, "Food sources")}
+        ${srCheckbox("sr-cc-water", r.contributingConditions.water, "Water/moisture")}
+        ${srCheckbox("sr-cc-clutter", r.contributingConditions.clutter, "Clutter")}
+        ${srCheckbox("sr-cc-cracks", r.contributingConditions.cracks, "Cracks or gaps")}
+        ${srCheckbox("sr-cc-openings", r.contributingConditions.openings, "Open doors/windows")}
+        ${srCheckbox("sr-cc-sanitation", r.contributingConditions.sanitation, "Poor sanitation")}
+        ${srCheckbox("sr-cc-other", r.contributingConditions.other, "Other")}
+      </div>
+      <input type="text" id="sr-cc-other-text" value="${esc(r.contributingConditions.otherText)}" placeholder="If Other, describe" style="margin-top:6px;">
+    </div>
+
+    <div class="sr-section-title">Treatment Performed</div>
+    <div class="field"><label>Treatment Method</label><textarea id="sr-treatment-method">${esc(r.treatmentMethod)}</textarea></div>
+    <label>Products Used</label>
+    <table class="line-items">
+      <thead><tr><th>Product Name</th><th>Active Ingredient</th><th>PCP #</th><th>Amount Used</th><th>Location</th><th></th></tr></thead>
+      <tbody>
+        ${products.map((p,i)=>`<tr>
+          <td><input type="text" data-srp="${i}" data-spf="name" value="${esc(p.name)}"></td>
+          <td><input type="text" data-srp="${i}" data-spf="activeIngredient" value="${esc(p.activeIngredient)}"></td>
+          <td><input type="text" data-srp="${i}" data-spf="pcpNumber" value="${esc(p.pcpNumber)}" style="width:80px"></td>
+          <td><input type="text" data-srp="${i}" data-spf="amountUsed" value="${esc(p.amountUsed)}" style="width:80px"></td>
+          <td><input type="text" data-srp="${i}" data-spf="location" value="${esc(p.location)}"></td>
+          <td>${products.length>1 ? `<button class="li-remove" data-remove-srp="${i}">✕</button>` : ""}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>
+    <div class="btn-row"><button class="btn subtle" id="add-srp">+ Add product</button></div>
+
+    <div class="grid2" style="margin-top:12px;">
+      <div class="field"><label>Target Pest</label><input type="text" id="sr-target-pest" value="${esc(r.targetPest)}"></div>
+      <div class="field"><label>Application Equipment</label><input type="text" id="sr-app-equipment" value="${esc(r.applicationEquipment)}"></div>
+    </div>
+    <div class="field"><label>Application Method</label>
+      <div class="cb-grid">
+        ${srCheckbox("sr-am-spray", r.applicationMethod.spray, "Spray")}
+        ${srCheckbox("sr-am-gel", r.applicationMethod.gelBait, "Gel Bait")}
+        ${srCheckbox("sr-am-dust", r.applicationMethod.dust, "Dust")}
+        ${srCheckbox("sr-am-bait", r.applicationMethod.baitStation, "Bait Station")}
+        ${srCheckbox("sr-am-trap", r.applicationMethod.trap, "Trap")}
+        ${srCheckbox("sr-am-fumigation", r.applicationMethod.fumigation, "Fumigation")}
+        ${srCheckbox("sr-am-other", r.applicationMethod.other, "Other")}
+      </div>
+      <input type="text" id="sr-am-other-text" value="${esc(r.applicationMethod.otherText)}" placeholder="If Other, describe" style="margin-top:6px;">
+    </div>
+    <div class="field"><label>Areas Treated</label><textarea id="sr-areas-treated">${esc(r.areasTreated)}</textarea></div>
+
+    <div class="sr-section-title">Recommendations</div>
+    <div class="field"><textarea id="sr-recommendations" placeholder="Recommendations for the customer">${esc(r.recommendations)}</textarea></div>
+
+    <div class="sr-section-title">Follow-Up</div>
+    <div class="grid2">
+      <div class="field"><label>Additional Treatment Required</label>
+        <div class="cb-grid">${["Yes","No"].map(o=>srRadio("srFollowUp",o,o,r.followUpRequired||"No")).join("")}</div>
+      </div>
+      <div class="field"><label>Recommended Follow-Up Date</label><input type="date" id="sr-followup-date" value="${esc(r.followUpDate)}"></div>
+    </div>
+
+    <div class="sr-section-title">General Comments</div>
+    <div class="field"><textarea id="sr-general-comments">${esc(r.generalComments||job.completedNotes||"")}</textarea></div>
+
+    <div class="sr-section-title">Photographs</div>
+    <div class="photo-grid">
+      ${photos.map(p=>`<div class="ph"><img src="${p.thumb}"><button data-remove-photo="${p.photoId}">✕</button></div>`).join("")}
+      ${photos.length<6 ? `<label class="upload-box" id="upload-label">+ Add<input type="file" id="photo-input" accept="image/*" multiple style="display:none;"></label>` : ""}
+    </div>
+
+    <div class="sr-section-title">Technician Declaration</div>
+    <div class="small" style="margin-bottom:8px;">I confirm that the inspection and treatment described in this report were carried out in accordance with company procedures and applicable regulations.</div>
+    <div class="grid2">
+      <div class="field"><label>Technician Name</label><input type="text" id="sr-tech-decl-name" value="${esc(r.technicianDeclaration.name || r.technicianName)}"></div>
+      <div class="field"><label>Signature (type full name)</label><input type="text" id="sr-tech-decl-signature" value="${esc(r.technicianDeclaration.signature)}"></div>
+      <div class="field"><label>Date</label><input type="date" id="sr-tech-decl-date" value="${esc(r.technicianDeclaration.date||todayISO())}"></div>
+    </div>
+
+    <div class="sr-section-title">Client Acknowledgment</div>
+    <div class="small" style="margin-bottom:8px;">I acknowledge that the pest control service described above has been completed and that I have received the safety instructions and recommendations.</div>
+    <div class="grid2">
+      <div class="field"><label>Client Name</label><input type="text" id="sr-client-ack-name" value="${esc(r.clientAcknowledgment.name || job.customer.name)}"></div>
+      <div class="field"><label>Signature (type full name)</label><input type="text" id="sr-client-ack-signature" value="${esc(r.clientAcknowledgment.signature)}"></div>
+      <div class="field"><label>Date</label><input type="date" id="sr-client-ack-date" value="${esc(r.clientAcknowledgment.date)}"></div>
+    </div>
+
+    <div class="btn-row" style="margin-top:16px;">
+      <button class="btn subtle" id="save-report">Save Report</button>
+      ${job.status!=="Closed" ? `<button class="btn green" id="send-report-email">Email Service Report</button>` : ""}
+    </div>
+    ${job.reportSentAt ? `<div class="notice green" style="margin-top:10px;">Service report emailed on ${fmtDate(job.reportSentAt)}.</div>` : ""}
+  </div>`;
+}
+
+function renderPaymentSection(job, totals){
+  const pay = job.payment || {amount: totals.total, method:"Cash"};
+  return `<div class="card">
+    <h2 style="font-size:15px;">Payment &amp; Close Case</h2>
+    <div class="sub">Record how payment was received, then close the case.</div>
+    <div class="grid2">
+      <div class="field"><label>Amount Received</label><input type="number" step="0.01" id="pay-amount" value="${pay.amount}"></div>
+      <div class="field"><label>Payment Method</label>
+        <div class="pay-methods">
+          <label class="opt ${pay.method==='Cash'?'sel':''}"><input type="radio" name="pm" value="Cash" ${pay.method==='Cash'?'checked':''}> Cash</label>
+          <label class="opt ${pay.method==='Card'?'sel':''}"><input type="radio" name="pm" value="Card" ${pay.method==='Card'?'checked':''}> Card</label>
+          <label class="opt ${pay.method==='E-transfer'?'sel':''}"><input type="radio" name="pm" value="E-transfer" ${pay.method==='E-transfer'?'checked':''}> E-transfer</label>
+        </div>
+      </div>
+    </div>
+    ${job.status==="Closed" ? `
+      <div class="notice green">Case closed. Paid ${money(job.payment.amount)} via ${esc(job.payment.method)} on ${fmtDate(job.payment.receivedAt)}.</div>
+      <div class="btn-row"><button class="btn subtle" id="send-receipt-email">Re-send Receipt</button></div>
+    ` : `<div class="btn-row"><button class="btn green" id="close-case">Record Payment &amp; Close Case</button></div>`}
+  </div>`;
+}
+
+/* ---------------- Settings ---------------- */
+function renderSettings(){
+  const s = state.settings;
+  return `<div class="card">
+    <h2>Company Settings</h2>
+    <div class="sub">These details appear on every quote and email.</div>
+    <div class="grid2">
+      <div class="field"><label>Company Name</label><input type="text" id="set-name" value="${esc(s.companyName)}"></div>
+      <div class="field"><label>Reply-to / Business Email</label><input type="email" id="set-email" value="${esc(s.fromEmail)}"></div>
+      <div class="field"><label>Phone</label><input type="text" id="set-phone" value="${esc(s.phone)}"></div>
+      <div class="field"><label>Address</label><input type="text" id="set-address" value="${esc(s.address)}"></div>
+      <div class="field"><label>License / Certification Note</label><input type="text" id="set-license" value="${esc(s.licenseNote)}"></div>
+      <div class="field"><label>Tax Rate % (HST)</label><input type="number" step="0.01" id="set-tax" value="${s.taxRate}"></div>
+      <div class="field"><label>Quote Validity (days)</label><input type="number" id="set-validity" value="${s.quoteValidityDays}"></div>
+      <div class="field"><label>Service Guarantee (days)</label><input type="number" id="set-warranty" value="${s.warrantyDays}"></div>
+      <div class="field"><label>Missed-Appointment / Trip Fee ($)</label><input type="number" step="0.01" id="set-trip" value="${s.tripFee}"></div>
+    </div>
+    <div class="notice blue">Emails send for real from whichever Google account owns this Apps Script project. Make sure that's the account you want customers to see (ideally ${esc(s.fromEmail)}).</div>
+    <div class="btn-row"><button class="btn green" id="save-settings">Save Settings</button></div>
+  </div>
+  <div class="card">
+    <h2>About Terms &amp; Conditions</h2>
+    <div class="sub">Auto-generated on every quote/report using the settings above (validity, warranty, trip fee). Modeled on standard industry practice (Orkin, Terminix, Abell Pest Control) and adapted for Ontario licensing (Pesticides Act &amp; Health Canada PMRA). Review with a legal advisor before relying on it for binding contracts.</div>
+  </div>`;
+}
+
+/* Bulk-reads the Service Report form from the DOM at Save/Send time
+   (instead of live two-way binding on every keystroke, which would force a
+   full re-render and lose input focus given how many fields this form has). */
+function readServiceReportForm(job){
+  const val = id => { const el = document.getElementById(id); return el ? el.value : ""; };
+  const checked = id => { const el = document.getElementById(id); return el ? el.checked : false; };
+  const radioVal = name => { const el = document.querySelector(`input[name="${name}"]:checked`); return el ? el.value : ""; };
+  const products = (job.serviceReport && job.serviceReport.products) || [];
+  return {
+    propertyType: radioVal("srPropertyType"),
+    dateOfService: val("sr-date"),
+    timeIn: val("sr-time-in"),
+    timeOut: val("sr-time-out"),
+    technicianName: val("sr-tech-name"),
+    technicianLicense: val("sr-tech-license"),
+    serviceType: radioVal("srServiceType"),
+    serviceTypeOther: val("sr-service-type-other"),
+    pestType: val("sr-pest-type"),
+    infestationLevel: radioVal("srInfestation"),
+    areasAffected: val("sr-areas-affected"),
+    evidence: {
+      livePests: checked("sr-ev-live"), deadPests: checked("sr-ev-dead"), droppings: checked("sr-ev-droppings"),
+      nesting: checked("sr-ev-nesting"), damage: checked("sr-ev-damage"), tracks: checked("sr-ev-tracks"),
+      other: checked("sr-ev-other"), otherText: val("sr-ev-other-text")
+    },
+    contributingConditions: {
+      food: checked("sr-cc-food"), water: checked("sr-cc-water"), clutter: checked("sr-cc-clutter"),
+      cracks: checked("sr-cc-cracks"), openings: checked("sr-cc-openings"), sanitation: checked("sr-cc-sanitation"),
+      other: checked("sr-cc-other"), otherText: val("sr-cc-other-text")
+    },
+    treatmentMethod: val("sr-treatment-method"),
+    products: products,
+    targetPest: val("sr-target-pest"),
+    applicationEquipment: val("sr-app-equipment"),
+    applicationMethod: {
+      spray: checked("sr-am-spray"), gelBait: checked("sr-am-gel"), dust: checked("sr-am-dust"),
+      baitStation: checked("sr-am-bait"), trap: checked("sr-am-trap"), fumigation: checked("sr-am-fumigation"),
+      other: checked("sr-am-other"), otherText: val("sr-am-other-text")
+    },
+    areasTreated: val("sr-areas-treated"),
+    recommendations: val("sr-recommendations"),
+    followUpRequired: radioVal("srFollowUp") || "No",
+    followUpDate: val("sr-followup-date"),
+    generalComments: val("sr-general-comments"),
+    technicianDeclaration: { name: val("sr-tech-decl-name"), signature: val("sr-tech-decl-signature"), date: val("sr-tech-decl-date") },
+    clientAcknowledgment: { name: val("sr-client-ack-name"), signature: val("sr-client-ack-signature"), date: val("sr-client-ack-date") }
+  };
+}
+
+/* ---------------- Events ---------------- */
+function bindEvents(){
+  document.querySelectorAll("[data-tab]").forEach(b=> b.onclick = ()=>{ ui.tab=b.dataset.tab; render(); });
+  document.querySelectorAll("[data-open]").forEach(r=> r.onclick = ()=>{ ui.openJobId = r.dataset.open; render(); });
+
+  const qcName = document.getElementById("qc-name");
+  if(qcName){
+    qcName.oninput = e=> ui.quoteDraft.customer.name = e.target.value;
+    document.getElementById("qc-phone").oninput = e=> ui.quoteDraft.customer.phone = e.target.value;
+    document.getElementById("qc-email").oninput = e=> ui.quoteDraft.customer.email = e.target.value;
+    document.getElementById("qc-address").oninput = e=> ui.quoteDraft.customer.address = e.target.value;
+    document.getElementById("qc-notes").oninput = e=> { ui.quoteDraft.notes = e.target.value; };
+    document.querySelectorAll("[data-pest]").forEach(p=> p.onclick = ()=>{
+      const val = p.dataset.pest; const idx = ui.quoteDraft.serviceTypes.indexOf(val);
+      if(idx>=0) ui.quoteDraft.serviceTypes.splice(idx,1); else ui.quoteDraft.serviceTypes.push(val);
+      render();
+    });
+    document.querySelectorAll("[data-li]").forEach(inp=> inp.onchange = e=>{
+      const i = Number(inp.dataset.li), f = inp.dataset.f;
+      ui.quoteDraft.lineItems[i][f] = (f==="desc") ? inp.value : Number(inp.value);
+      render();
+    });
+    document.querySelectorAll("[data-remove-li]").forEach(b=> b.onclick = ()=>{ ui.quoteDraft.lineItems.splice(Number(b.dataset.removeLi),1); render(); });
+    document.getElementById("add-li").onclick = ()=>{ ui.quoteDraft.lineItems.push({desc:"",qty:1,price:0}); render(); };
+    document.getElementById("reset-quote").onclick = ()=>{ ui.quoteDraft = blankDraft(); render(); };
+    document.getElementById("save-quote").onclick = async ()=>{
+      const d = ui.quoteDraft;
+      if(!d.customer.name || !d.customer.address){ alert("Please enter at least customer name and address."); return; }
+      const btn = document.getElementById("save-quote"); btn.disabled = true; btn.textContent = "Saving…";
+      try{
+        const id = await call("createJob", d);
+        await refreshJobs();
+        ui.quoteDraft = blankDraft(); ui.tab="jobs"; ui.openJobId = id;
+        showToast("Quote saved.");
+      }catch(err){ alert("Could not save quote: "+(err.message||err)); }
+      render();
+    };
+  }
+
+  const closeBtn = document.getElementById("close-modal");
+  if(closeBtn) closeBtn.onclick = ()=>{ ui.openJobId=null; render(); };
+  const bg = document.getElementById("modal-bg");
+  if(bg) bg.onclick = (e)=>{ if(e.target.id==="modal-bg"){ ui.openJobId=null; render(); } };
+
+  const sendQuoteBtn = document.getElementById("send-quote-email");
+  if(sendQuoteBtn) sendQuoteBtn.onclick = async ()=>{
+    const job = state.jobs.find(j=>j.id===ui.openJobId);
+    if(!job.customer.email){ alert("Add a customer email address to send the quote."); return; }
+    sendQuoteBtn.disabled = true; sendQuoteBtn.innerHTML = '<span class="spinner"></span> Sending…';
+    try{ await call("sendQuoteEmail", job.id); await refreshJobs(); showToast("Quote emailed to customer."); }
+    catch(err){ alert("Could not send quote: "+(err.message||err)); }
+    render();
+  };
+
+  const markSched = document.getElementById("mark-scheduled");
+  if(markSched) markSched.onclick = async ()=>{ const job=state.jobs.find(j=>j.id===ui.openJobId); await call("markScheduled", job.id, todayISO()); await refreshJobs(); render(); };
+  const schedDate = document.getElementById("scheduled-date");
+  if(schedDate) schedDate.onchange = async e=>{ const job=state.jobs.find(j=>j.id===ui.openJobId); await call("markScheduled", job.id, e.target.value); await refreshJobs(); };
+  const markComp = document.getElementById("mark-completed");
+  if(markComp) markComp.onclick = async ()=>{ const job=state.jobs.find(j=>j.id===ui.openJobId); await call("markCompleted", job.id); await refreshJobs(); render(); };
+
+  const photoInput = document.getElementById("photo-input");
+  if(photoInput) photoInput.onchange = async (e)=>{
+    const job = state.jobs.find(j=>j.id===ui.openJobId);
+    const label = document.getElementById("upload-label");
+    if(label) label.textContent = "Uploading…";
+    const files = Array.from(e.target.files).slice(0, 6-(job.photos||[]).length);
+    for(const f of files){
+      try{
+        const base64 = await fileToCompressedBase64(f, 700, 0.55);
+        await callPost("addPhoto", [job.id, f.name, base64, "image/jpeg"]);
+      }catch(err){}
+    }
+    await refreshJobs(); render();
+  };
+  document.querySelectorAll("[data-remove-photo]").forEach(b=> b.onclick = async ()=>{
+    await call("removePhoto", b.dataset.removePhoto); await refreshJobs(); render();
+  });
+
+  // Service report: product rows are array-backed (like quote line items) so
+  // add/remove need a re-render; everything else is read in bulk from the DOM
+  // at Save time (readServiceReportForm) to avoid re-rendering on every keystroke.
+  document.querySelectorAll("[data-srp]").forEach(inp=> inp.onchange = e=>{
+    const job = state.jobs.find(j=>j.id===ui.openJobId);
+    const i = Number(inp.dataset.srp), f = inp.dataset.spf;
+    job.serviceReport.products[i][f] = inp.value;
+  });
+  const addSrp = document.getElementById("add-srp");
+  if(addSrp) addSrp.onclick = ()=>{
+    const job = state.jobs.find(j=>j.id===ui.openJobId);
+    job.serviceReport.products.push({name:"",activeIngredient:"",pcpNumber:"",amountUsed:"",location:""});
+    render();
+  };
+  document.querySelectorAll("[data-remove-srp]").forEach(b=> b.onclick = ()=>{
+    const job = state.jobs.find(j=>j.id===ui.openJobId);
+    job.serviceReport.products.splice(Number(b.dataset.removeSrp),1);
+    render();
+  });
+
+  const saveReport = document.getElementById("save-report");
+  if(saveReport) saveReport.onclick = async ()=>{
+    const job = state.jobs.find(j=>j.id===ui.openJobId);
+    const report = readServiceReportForm(job);
+    job.serviceReport = report;
+    job.completedNotes = report.generalComments || "";
+    saveReport.disabled = true; saveReport.textContent = "Saving…";
+    try{ await call("saveServiceReport", job.id, report); showToast("Report saved."); }
+    catch(err){ alert("Could not save report: "+(err.message||err)); }
+    render();
+  };
+  const sendReport = document.getElementById("send-report-email");
+  if(sendReport) sendReport.onclick = async ()=>{
+    const job = state.jobs.find(j=>j.id===ui.openJobId);
+    if(!job.customer.email){ alert("Add a customer email address to send the report."); return; }
+    const report = readServiceReportForm(job);
+    job.serviceReport = report;
+    job.completedNotes = report.generalComments || "";
+    sendReport.disabled = true; sendReport.innerHTML = '<span class="spinner"></span> Sending…';
+    try{
+      await call("saveServiceReport", job.id, report);
+      await call("sendReportEmail", job.id);
+      await refreshJobs();
+      showToast("Service report emailed.");
+    }catch(err){ alert("Could not send report: "+(err.message||err)); }
+    render();
+  };
+
+  document.querySelectorAll('input[name="pm"]').forEach(r=> r.onchange = ()=>{
+    const job = state.jobs.find(j=>j.id===ui.openJobId); job.payment = job.payment || {}; job.payment.method = r.value; render();
+  });
+  const payAmount = document.getElementById("pay-amount");
+  if(payAmount) payAmount.oninput = e=>{ const job=state.jobs.find(j=>j.id===ui.openJobId); job.payment = job.payment||{}; job.payment.amount = Number(e.target.value); };
+  const closeCase = document.getElementById("close-case");
+  if(closeCase) closeCase.onclick = async ()=>{
+    const job = state.jobs.find(j=>j.id===ui.openJobId);
+    const totals = calcTotals(job.lineItems, state.settings.taxRate);
+    const amount = (job.payment && job.payment.amount) ? job.payment.amount : totals.total;
+    const method = (job.payment && job.payment.method) ? job.payment.method : "Cash";
+    closeCase.disabled = true; closeCase.innerHTML = '<span class="spinner"></span> Closing…';
+    try{ await call("recordPayment", job.id, amount, method); await refreshJobs(); showToast("Case closed. Receipt emailed."); }
+    catch(err){ alert("Could not close case: "+(err.message||err)); }
+    render();
+  };
+  const sendReceipt = document.getElementById("send-receipt-email");
+  if(sendReceipt) sendReceipt.onclick = async ()=>{
+    const job = state.jobs.find(j=>j.id===ui.openJobId);
+    try{ await call("sendReceiptEmail", job.id); showToast("Receipt re-sent."); }
+    catch(err){ alert("Could not send receipt: "+(err.message||err)); }
+  };
+
+  const saveSettingsBtn = document.getElementById("save-settings");
+  if(saveSettingsBtn) saveSettingsBtn.onclick = async ()=>{
+    const s = {
+      companyName: document.getElementById("set-name").value,
+      fromEmail: document.getElementById("set-email").value,
+      phone: document.getElementById("set-phone").value,
+      address: document.getElementById("set-address").value,
+      licenseNote: document.getElementById("set-license").value,
+      taxRate: Number(document.getElementById("set-tax").value),
+      quoteValidityDays: Number(document.getElementById("set-validity").value),
+      warrantyDays: Number(document.getElementById("set-warranty").value),
+      tripFee: Number(document.getElementById("set-trip").value),
+    };
+    saveSettingsBtn.disabled = true; saveSettingsBtn.textContent = "Saving…";
+    try{ state.settings = await call("saveSettings", s); showToast("Settings saved."); }
+    catch(err){ alert("Could not save settings: "+(err.message||err)); }
+    render();
+  };
+}
+
+init();
+</script>
+</body>
+</html>
