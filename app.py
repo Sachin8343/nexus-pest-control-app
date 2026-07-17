@@ -27,7 +27,7 @@ Required environment variables (set these in your host, never commit them):
 """
 
 import base64
-import gc
+import gc as gc_module  # aliased: this module already defines a gc() function (the Sheets client getter)
 import json
 import os
 import re
@@ -770,7 +770,7 @@ def generate_and_store_report_pdf(job_id, photo_bytes=None):
     del photo_uris
     pdf_bytes = html_to_pdf_bytes(html)
     del html
-    gc.collect()
+    gc_module.collect()
 
     safe_name = re.sub(r"[^A-Za-z0-9 _-]", "", job["customer"].get("name") or "Customer")
     date_part = job.get("completedAt") or now_iso()[:10]
@@ -804,7 +804,7 @@ def complete_job_with_report(job_id, report, send_to_customer):
         sent = True
     result = {"pdfUrl": pdf_info["url"], "sent": sent}
     del photo_bytes, pdf_info
-    gc.collect()
+    gc_module.collect()
     return result
 
 
@@ -927,7 +927,7 @@ def send_report_email(job_id, photo_bytes=None, pdf_bytes=None):
     )
     set_job_field(job_id, "reportSentAt", now_iso())
     del inline_images, attachments, html
-    gc.collect()
+    gc_module.collect()
     return True
 
 
