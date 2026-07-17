@@ -27,6 +27,7 @@ Required environment variables (set these in your host, never commit them):
 """
 
 import base64
+import gc
 import json
 import os
 import re
@@ -576,17 +577,40 @@ def report_email_html(job, s, cid_names):
 
 
 # ---------------- PDF service report (with signatures) ----------------
-def _photo_data_uris(job, limit=6):
-    """Fetch job photos from Drive and return them as base64 data: URIs so the
-    PDF renderer doesn't need to make outbound network requests for images."""
-    uris = []
+def _fetch_job_photo_bytes(job, limit=6):
+    """Fetch raw photo bytes from Drive ONCE. Both the emailed inline images
+    and the PDF reuse this same list instead of each re-downloading from Drive
+    — on Render's free 512MB instance, doubling up on Drive round-trips and
+    in-memory copies was a real contributor to OOM crashes."""
+    out = []
     for p in (job.get("photos") or [])[:limit]:
         try:
-            data = drive().files().get_media(fileId=p["fileId"]).execute()
-            uris.append("data:image/jpeg;base64," + base64.b64encode(data).decode("ascii"))
+            out.append(drive().files().get_media(fileId=p["fileId"]).execute())
         except Exception:
             pass
-    return uris
+    return out
+
+
+def _downscaled_data_uri(img_bytes, max_dim=260, quality=55):
+    """Re-encodes a photo at PDF-display size before embedding it. The photos
+    are already client-compressed to ~700px for the dashboard/email, but
+    reportlab decodes the full image just to draw it at ~130px in the PDF —
+    downscaling server-side first cuts that decode memory substantially."""
+    try:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(img_bytes))
+        img.thumbnail((max_dim, max_dim))
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=quality)
+        small_bytes = out.getvalue()
+        del img, out
+        return "data:image/jpeg;base64," + base64.b64encode(small_bytes).decode("ascii")
+    except Exception:
+        # Fall back to the original bytes if Pillow can't decode it for any reason.
+        return "data:image/jpeg;base64," + base64.b64encode(img_bytes).decode("ascii")
 
 
 def report_pdf_html(job, s, photo_data_uris, cust_sig_data_uri, tech_sig_data_uri):
@@ -725,15 +749,28 @@ def html_to_pdf_bytes(html):
     return buf.getvalue()
 
 
-def generate_and_store_report_pdf(job_id):
+def generate_and_store_report_pdf(job_id, photo_bytes=None):
+    """Builds the signed PDF and uploads it to Drive. Returns the raw PDF bytes
+    too (not just the Drive file id) so callers that also need to email it
+    right away (complete_job_with_report / send_report_email) don't have to
+    download it back from Drive a second time."""
     job = get_job_by_id(job_id)
     s = get_settings()
     r = job.get("serviceReport") or {}
     cust_sig = (r.get("clientAcknowledgment") or {}).get("signature") or ""
     tech_sig = (r.get("technicianDeclaration") or {}).get("signature") or ""
-    photo_uris = _photo_data_uris(job)
+
+    if photo_bytes is None:
+        photo_bytes = _fetch_job_photo_bytes(job)
+    # The PDF only needs a handful of small preview images — keep this
+    # tighter than the email's inline photo count to limit decode memory.
+    photo_uris = [_downscaled_data_uri(b) for b in photo_bytes[:4]]
+
     html = report_pdf_html(job, s, photo_uris, cust_sig, tech_sig)
+    del photo_uris
     pdf_bytes = html_to_pdf_bytes(html)
+    del html
+    gc.collect()
 
     safe_name = re.sub(r"[^A-Za-z0-9 _-]", "", job["customer"].get("name") or "Customer")
     date_part = job.get("completedAt") or now_iso()[:10]
@@ -746,20 +783,29 @@ def generate_and_store_report_pdf(job_id):
     file_id = file["id"]
     drive().permissions().create(fileId=file_id, body={"type": "anyone", "role": "reader"}).execute()
     set_job_field(job_id, "reportPdfFileId", file_id)
-    return {"fileId": file_id, "url": f"https://drive.google.com/file/d/{file_id}/view"}
+    return {"fileId": file_id, "url": f"https://drive.google.com/file/d/{file_id}/view", "bytes": pdf_bytes}
 
 
 def complete_job_with_report(job_id, report, send_to_customer):
     """Saves the signed service report, marks the job completed, generates the
-    signed PDF, and (if the technician chose to) emails it to the customer."""
+    signed PDF, and (if the technician chose to) emails it to the customer.
+    Fetches job photos from Drive exactly once and reuses them for both the
+    PDF and the email — this endpoint does several memory-heavy things
+    back-to-back (PDF render + email attachment) so it frees each big buffer
+    as soon as it's no longer needed rather than letting them all pile up."""
     save_service_report(job_id, report)
     mark_completed(job_id)
-    pdf_info = generate_and_store_report_pdf(job_id)
+    job = get_job_by_id(job_id)
+    photo_bytes = _fetch_job_photo_bytes(job)
+    pdf_info = generate_and_store_report_pdf(job_id, photo_bytes=photo_bytes)
     sent = False
     if send_to_customer:
-        send_report_email(job_id)
+        send_report_email(job_id, photo_bytes=photo_bytes, pdf_bytes=pdf_info["bytes"])
         sent = True
-    return {"pdfUrl": pdf_info["url"], "sent": sent}
+    result = {"pdfUrl": pdf_info["url"], "sent": sent}
+    del photo_bytes, pdf_info
+    gc.collect()
+    return result
 
 
 def receipt_email_html(job, s):
@@ -833,39 +879,45 @@ def send_quote_email(job_id):
     return True
 
 
-def send_report_email(job_id):
+def send_report_email(job_id, photo_bytes=None, pdf_bytes=None):
+    """photo_bytes / pdf_bytes let complete_job_with_report pass along data it
+    already fetched this request, instead of this function re-downloading the
+    same photos/PDF from Drive again (a real memory/latency cost on a free
+    512MB instance). Manual re-sends (no caller-supplied bytes) still work —
+    they just fetch fresh."""
     job = get_job_by_id(job_id)
     s = get_settings()
     if not job["customer"]["email"]:
         raise ValueError("No customer email on file.")
+
+    if photo_bytes is None:
+        photo_bytes = _fetch_job_photo_bytes(job)
     inline_images = {}
     cid_names = []
-    for i, p in enumerate((job.get("photos") or [])[:6]):
-        try:
-            data = drive().files().get_media(fileId=p["fileId"]).execute()
-            cid = f"photo{i}"
-            inline_images[cid] = data
-            cid_names.append(cid)
-        except Exception:
-            pass
+    for i, data in enumerate(photo_bytes[:6]):
+        cid = f"photo{i}"
+        inline_images[cid] = data
+        cid_names.append(cid)
     html = report_email_html(job, s, cid_names)
 
     # Make sure a signed PDF exists and attach it — this is the record the
     # customer keeps (with both signatures embedded).
     attachments = []
-    pdf_file_id = job.get("reportPdfFileId")
-    if not pdf_file_id:
-        try:
-            pdf_info = generate_and_store_report_pdf(job_id)
-            pdf_file_id = pdf_info["fileId"]
-        except Exception:
-            pdf_file_id = None
-    if pdf_file_id:
-        try:
-            pdf_bytes = drive().files().get_media(fileId=pdf_file_id).execute()
-            attachments.append(("Service Report.pdf", pdf_bytes, "application/pdf"))
-        except Exception:
-            pass
+    if pdf_bytes is None:
+        pdf_file_id = job.get("reportPdfFileId")
+        if not pdf_file_id:
+            try:
+                pdf_info = generate_and_store_report_pdf(job_id, photo_bytes=photo_bytes)
+                pdf_bytes = pdf_info["bytes"]
+            except Exception:
+                pdf_bytes = None
+        else:
+            try:
+                pdf_bytes = drive().files().get_media(fileId=pdf_file_id).execute()
+            except Exception:
+                pdf_bytes = None
+    if pdf_bytes:
+        attachments.append(("Service Report.pdf", pdf_bytes, "application/pdf"))
 
     send_email(
         to=job["customer"]["email"], cc=s["fromEmail"],
@@ -874,6 +926,8 @@ def send_report_email(job_id):
         inline_images=inline_images, attachments=attachments,
     )
     set_job_field(job_id, "reportSentAt", now_iso())
+    del inline_images, attachments, html
+    gc.collect()
     return True
 
 
