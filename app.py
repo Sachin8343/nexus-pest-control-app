@@ -41,7 +41,7 @@ from email.mime.text import MIMEText
 from email.utils import formataddr
 from zoneinfo import ZoneInfo
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
@@ -295,9 +295,15 @@ def get_jobs():
         )
         o["serviceReport"] = json.loads(o["serviceReportJSON"]) if o.get("serviceReportJSON") else None
         o["photos"] = photos_by_job.get(str(o["id"]), [])
+        # The signed PDF isn't stored anywhere (Drive rejects uploads from a
+        # service account into a personal-account folder — see
+        # generate_and_store_report_pdf) — it's rebuilt on request instead.
+        # Show the link once there's a saved report with at least the
+        # customer's signature on it.
+        _r = o["serviceReport"] or {}
         o["reportPdfUrl"] = (
-            f"https://drive.google.com/file/d/{o['reportPdfFileId']}/view"
-            if o.get("reportPdfFileId") else None
+            f"/report-pdf/{o['id']}"
+            if (_r.get("clientAcknowledgment") or {}).get("signature") else None
         )
         jobs.append(o)
     jobs.sort(key=lambda j: j.get("createdAt") or "", reverse=True)
@@ -770,10 +776,19 @@ def html_to_pdf_bytes(html):
 
 
 def generate_and_store_report_pdf(job_id, photo_bytes=None, job=None, settings=None):
-    """Builds the signed PDF and uploads it to Drive. Returns the raw PDF bytes
-    too (not just the Drive file id) so callers that also need to email it
-    right away (complete_job_with_report / send_report_email) don't have to
-    download it back from Drive a second time.
+    """Builds the signed PDF and returns the raw bytes.
+
+    NOTE: this used to also upload the PDF to Drive so there'd be a permanent
+    link, but Drive rejected every upload with a 403
+    "Service Accounts do not have storage quota" error. That's not a
+    permissions/sharing problem — it's a hard Google Drive limitation for any
+    service account writing into a *personal* (non-Workspace) Google account's
+    storage: service accounts get 0 storage quota there, and the Shared
+    Drives / domain-wide-delegation workarounds both require a paid Google
+    Workspace account, which this project isn't on. So instead of storing the
+    PDF anywhere, we just regenerate it on demand — the report is fully
+    reproducible from the job's saved serviceReport + photos, so a stored copy
+    isn't actually necessary. See the "/report-pdf/<job_id>" route below.
 
     job/settings let a caller that already has them (complete_job_with_report)
     pass them straight through — every Sheets read counts against Google's
@@ -797,18 +812,7 @@ def generate_and_store_report_pdf(job_id, photo_bytes=None, job=None, settings=N
     del html
     gc_module.collect()
 
-    safe_name = re.sub(r"[^A-Za-z0-9 _-]", "", job["customer"].get("name") or "Customer")
-    date_part = job.get("completedAt") or now_iso()[:10]
-    filename = f"Service Report - {safe_name} - {date_part}.pdf"
-    media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype="application/pdf", resumable=False)
-    file = drive().files().create(
-        body={"name": filename, "parents": [photo_folder_id()]},
-        media_body=media, fields="id",
-    ).execute()
-    file_id = file["id"]
-    drive().permissions().create(fileId=file_id, body={"type": "anyone", "role": "reader"}).execute()
-    set_job_field(job_id, "reportPdfFileId", file_id)
-    return {"fileId": file_id, "url": f"https://drive.google.com/file/d/{file_id}/view", "bytes": pdf_bytes}
+    return {"url": f"/report-pdf/{job_id}", "bytes": pdf_bytes}
 
 
 def complete_job_with_report(job_id, report, send_to_customer):
@@ -933,21 +937,16 @@ def send_report_email(job_id, photo_bytes=None, pdf_bytes=None, job=None, settin
     html = report_email_html(job, s, cid_names)
 
     # Make sure a signed PDF exists and attach it — this is the record the
-    # customer keeps (with both signatures embedded).
+    # customer keeps (with both signatures embedded). The PDF isn't stored
+    # anywhere (see generate_and_store_report_pdf's docstring), so a resend
+    # just regenerates it fresh from the saved serviceReport data.
     attachments = []
     if pdf_bytes is None:
-        pdf_file_id = job.get("reportPdfFileId")
-        if not pdf_file_id:
-            try:
-                pdf_info = generate_and_store_report_pdf(job_id, photo_bytes=photo_bytes, job=job, settings=s)
-                pdf_bytes = pdf_info["bytes"]
-            except Exception:
-                pdf_bytes = None
-        else:
-            try:
-                pdf_bytes = drive().files().get_media(fileId=pdf_file_id).execute()
-            except Exception:
-                pdf_bytes = None
+        try:
+            pdf_info = generate_and_store_report_pdf(job_id, photo_bytes=photo_bytes, job=job, settings=s)
+            pdf_bytes = pdf_info["bytes"]
+        except Exception:
+            pdf_bytes = None
     if pdf_bytes:
         attachments.append(("Service Report.pdf", pdf_bytes, "application/pdf"))
 
@@ -1036,6 +1035,28 @@ def api():
         action = body.get("action")
         args = body.get("payload") or []
     return jsonify(handle_api(action, args))
+
+
+@app.route("/report-pdf/<job_id>")
+def report_pdf(job_id):
+    """Regenerates the signed service-report PDF fresh and streams it back.
+    There's no stored copy to fetch (see generate_and_store_report_pdf) —
+    everything needed (service report answers, both signatures, photos) is
+    already saved on the job, so it's cheap to rebuild on every request."""
+    try:
+        job = get_job_by_id(job_id)
+        if not job:
+            return ("Job not found.", 404)
+        pdf_info = generate_and_store_report_pdf(job_id, job=job, settings=get_settings())
+    except Exception as err:
+        return (f"Could not generate the report PDF: {err}", 500)
+    safe_name = re.sub(r"[^A-Za-z0-9 _-]", "", job["customer"].get("name") or "Customer")
+    filename = f"Service Report - {safe_name}.pdf"
+    return Response(
+        pdf_info["bytes"],
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @app.route("/healthz")
