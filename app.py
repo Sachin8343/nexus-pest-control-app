@@ -251,6 +251,24 @@ def get_photos_for_job(job_id):
     return out
 
 
+def get_photos_by_job():
+    """Reads the Photos sheet ONCE and groups rows by jobId in memory. get_jobs()
+    used to call get_photos_for_job() per job, which re-read the entire Photos
+    sheet from scratch for every single job (N+1 Sheets API reads) — with more
+    than a handful of jobs this tripped Google's per-minute read quota (429
+    'Quota exceeded' errors). This does the same grouping with one read."""
+    sh = get_or_create_sheet(PHOTOS_SHEET, PHOTO_HEADERS)
+    by_job = {}
+    for r in all_rows(sh):
+        if len(r) > 1 and r[1]:
+            by_job.setdefault(str(r[1]), []).append({
+                "photoId": r[0], "jobId": r[1], "fileId": r[2],
+                "name": r[3] if len(r) > 3 else "", "uploadedAt": r[4] if len(r) > 4 else "",
+                "thumb": f"https://drive.google.com/thumbnail?id={r[2]}&sz=w300",
+            })
+    return by_job
+
+
 # ---------------- Jobs ----------------
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
@@ -258,8 +276,10 @@ def now_iso():
 
 def get_jobs():
     sh = get_or_create_sheet(JOBS_SHEET, JOB_HEADERS)
+    rows = all_rows(sh)
+    photos_by_job = get_photos_by_job()  # one Sheets read, reused for every job below
     jobs = []
-    for r in all_rows(sh):
+    for r in rows:
         if not r or not r[0]:
             continue
         o = row_to_object(JOB_HEADERS, r)
@@ -274,7 +294,7 @@ def get_jobs():
             if o.get("paymentAmount") else None
         )
         o["serviceReport"] = json.loads(o["serviceReportJSON"]) if o.get("serviceReportJSON") else None
-        o["photos"] = get_photos_for_job(o["id"])
+        o["photos"] = photos_by_job.get(str(o["id"]), [])
         o["reportPdfUrl"] = (
             f"https://drive.google.com/file/d/{o['reportPdfFileId']}/view"
             if o.get("reportPdfFileId") else None
@@ -749,13 +769,18 @@ def html_to_pdf_bytes(html):
     return buf.getvalue()
 
 
-def generate_and_store_report_pdf(job_id, photo_bytes=None):
+def generate_and_store_report_pdf(job_id, photo_bytes=None, job=None, settings=None):
     """Builds the signed PDF and uploads it to Drive. Returns the raw PDF bytes
     too (not just the Drive file id) so callers that also need to email it
     right away (complete_job_with_report / send_report_email) don't have to
-    download it back from Drive a second time."""
-    job = get_job_by_id(job_id)
-    s = get_settings()
+    download it back from Drive a second time.
+
+    job/settings let a caller that already has them (complete_job_with_report)
+    pass them straight through — every Sheets read counts against Google's
+    per-minute read quota, and re-fetching the same job + settings 2-3 times
+    within one "Finish Report & Sign Off" click was enough to trip it."""
+    job = job if job is not None else get_job_by_id(job_id)
+    s = settings if settings is not None else get_settings()
     r = job.get("serviceReport") or {}
     cust_sig = (r.get("clientAcknowledgment") or {}).get("signature") or ""
     tech_sig = (r.get("technicianDeclaration") or {}).get("signature") or ""
@@ -796,11 +821,12 @@ def complete_job_with_report(job_id, report, send_to_customer):
     save_service_report(job_id, report)
     mark_completed(job_id)
     job = get_job_by_id(job_id)
+    s = get_settings()
     photo_bytes = _fetch_job_photo_bytes(job)
-    pdf_info = generate_and_store_report_pdf(job_id, photo_bytes=photo_bytes)
+    pdf_info = generate_and_store_report_pdf(job_id, photo_bytes=photo_bytes, job=job, settings=s)
     sent = False
     if send_to_customer:
-        send_report_email(job_id, photo_bytes=photo_bytes, pdf_bytes=pdf_info["bytes"])
+        send_report_email(job_id, photo_bytes=photo_bytes, pdf_bytes=pdf_info["bytes"], job=job, settings=s)
         sent = True
     result = {"pdfUrl": pdf_info["url"], "sent": sent}
     del photo_bytes, pdf_info
@@ -879,14 +905,15 @@ def send_quote_email(job_id):
     return True
 
 
-def send_report_email(job_id, photo_bytes=None, pdf_bytes=None):
-    """photo_bytes / pdf_bytes let complete_job_with_report pass along data it
-    already fetched this request, instead of this function re-downloading the
-    same photos/PDF from Drive again (a real memory/latency cost on a free
-    512MB instance). Manual re-sends (no caller-supplied bytes) still work —
-    they just fetch fresh."""
-    job = get_job_by_id(job_id)
-    s = get_settings()
+def send_report_email(job_id, photo_bytes=None, pdf_bytes=None, job=None, settings=None):
+    """photo_bytes / pdf_bytes / job / settings let complete_job_with_report
+    pass along data it already fetched this request, instead of this function
+    re-downloading the same photos/PDF/job/settings from Drive and Sheets
+    again. That duplication was costing enough Sheets API reads per click to
+    trip Google's per-minute read quota (429 errors). Manual re-sends (no
+    caller-supplied values) still work — they just fetch fresh."""
+    job = job if job is not None else get_job_by_id(job_id)
+    s = settings if settings is not None else get_settings()
     if not job["customer"]["email"]:
         raise ValueError("No customer email on file.")
 
@@ -907,7 +934,7 @@ def send_report_email(job_id, photo_bytes=None, pdf_bytes=None):
         pdf_file_id = job.get("reportPdfFileId")
         if not pdf_file_id:
             try:
-                pdf_info = generate_and_store_report_pdf(job_id, photo_bytes=photo_bytes)
+                pdf_info = generate_and_store_report_pdf(job_id, photo_bytes=photo_bytes, job=job, settings=s)
                 pdf_bytes = pdf_info["bytes"]
             except Exception:
                 pdf_bytes = None
