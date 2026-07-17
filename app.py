@@ -882,7 +882,12 @@ def send_email(to, subject, html_body, text_body, cc=None, inline_images=None, a
         msg.attach(part)
 
     recipients = [to] + ([cc] if cc else [])
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+    # Explicit timeout matters here: smtplib.SMTP() with no timeout can hang
+    # indefinitely on a slow/unreliable outbound connection (observed on
+    # Render's free tier), and gunicorn's default 30s worker timeout would
+    # then SIGKILL the whole worker (logged misleadingly as "out of memory?")
+    # instead of this raising a normal, catchable exception.
+    with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as server:
         server.starttls()
         server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
         server.sendmail(GMAIL_ADDRESS, recipients, msg.as_string())
