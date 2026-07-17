@@ -140,7 +140,7 @@ def ensure_headers(sh, headers):
     """Migration helper: pad the header row if a sheet is missing newly-added columns."""
     existing = sh.row_values(1)
     if len(existing) < len(headers):
-        sh.update("A1", [headers])
+        sh.update(range_name="A1", values=[headers])
 
 
 def all_rows(sh):
@@ -189,7 +189,7 @@ def save_settings(settings):
     sh = get_or_create_sheet(SETTINGS_SHEET, ["key", "value"])
     sh.clear()
     rows = [["key", "value"]] + [[k, settings.get(k, SETTINGS_DEFAULTS[k])] for k in SETTINGS_DEFAULTS]
-    sh.update("A1", rows)
+    sh.update(range_name="A1", values=rows)
     return get_settings()
 
 
