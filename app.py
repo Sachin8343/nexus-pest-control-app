@@ -755,7 +755,7 @@ def report_pdf_html(job, s, photo_data_uris, cust_sig_data_uri, tech_sig_data_ur
         + (section_heading("Pest Identified") + pest_section if has_report else "")
         + (section_heading("Observations") + observation if has_report else "")
         + (section_heading("Treatment Performed") + treatment if has_report else "")
-        + (section_heading("Recommendations &amp; Follow-Up") + follow_up if has_report else "")
+        + (section_heading("Recommendations & Follow-Up") + follow_up if has_report else "")
         + (section_heading("Photographs") + f"<div>{photos_html}</div>" if photos_html else "")
         + section_heading("Signatures") + sig_block
         + f'<p style="font-size:9px;color:#8992a0;margin-top:16px;">{esc(s["companyName"])} &bull; {esc(s["address"])} &bull; {esc(s["phone"])} &bull; {esc(s["fromEmail"])}<br>'
