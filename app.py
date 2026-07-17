@@ -32,6 +32,7 @@ import json
 import os
 import re
 import smtplib
+import socket
 import uuid
 from datetime import datetime, timezone
 from email.mime.application import MIMEApplication
@@ -853,6 +854,26 @@ def receipt_email_html(job, s):
 
 
 # ---------------- Email sending (Gmail SMTP) ----------------
+class _IPv4SMTP(smtplib.SMTP):
+    """Plain smtplib.SMTP resolves smtp.gmail.com via whatever getaddrinfo()
+    returns first, which on Render's free tier is an IPv6 (AAAA) address —
+    but that network has no outbound IPv6 route, so the connection fails
+    immediately with "[Errno 101] Network is unreachable" instead of
+    connecting over IPv4. Forcing AF_INET here fixes that; STARTTLS/cert
+    verification still uses the hostname (self._host), so this doesn't
+    affect TLS at all."""
+
+    def _get_socket(self, host, port, timeout):
+        addr_info = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+        sock = socket.socket(addr_info[0][0], addr_info[0][1], addr_info[0][2])
+        if timeout is not smtplib._GLOBAL_DEFAULT_TIMEOUT:
+            sock.settimeout(timeout)
+        if self.source_address:
+            sock.bind(self.source_address)
+        sock.connect(addr_info[0][4])
+        return sock
+
+
 def send_email(to, subject, html_body, text_body, cc=None, inline_images=None, attachments=None):
     if not GMAIL_APP_PASSWORD:
         raise RuntimeError("GMAIL_APP_PASSWORD env var is not set. See README.md setup steps.")
@@ -891,7 +912,7 @@ def send_email(to, subject, html_body, text_body, cc=None, inline_images=None, a
     # Render's free tier), and gunicorn's default 30s worker timeout would
     # then SIGKILL the whole worker (logged misleadingly as "out of memory?")
     # instead of this raising a normal, catchable exception.
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as server:
+    with _IPv4SMTP("smtp.gmail.com", 587, timeout=20) as server:
         server.starttls()
         server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
         server.sendmail(GMAIL_ADDRESS, recipients, msg.as_string())
