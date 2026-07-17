@@ -583,28 +583,104 @@ function renderServiceReportSection(job){
       ${photos.length<6 ? `<label class="upload-box" id="upload-label">+ Add<input type="file" id="photo-input" accept="image/*" multiple style="display:none;"></label>` : ""}
     </div>
 
-    <div class="sr-section-title">Technician Declaration</div>
-    <div class="small" style="margin-bottom:8px;">I confirm that the inspection and treatment described in this report were carried out in accordance with company procedures and applicable regulations.</div>
-    <div class="grid2">
-      <div class="field"><label>Technician Name</label><input type="text" id="sr-tech-decl-name" value="${esc(r.technicianDeclaration.name || r.technicianName)}"></div>
-      <div class="field"><label>Signature (type full name)</label><input type="text" id="sr-tech-decl-signature" value="${esc(r.technicianDeclaration.signature)}"></div>
-      <div class="field"><label>Date</label><input type="date" id="sr-tech-decl-date" value="${esc(r.technicianDeclaration.date||todayISO())}"></div>
-    </div>
-
-    <div class="sr-section-title">Client Acknowledgment</div>
+    <div class="sr-section-title">Client Acknowledgment — Customer Signs First</div>
     <div class="small" style="margin-bottom:8px;">I acknowledge that the pest control service described above has been completed and that I have received the safety instructions and recommendations.</div>
     <div class="grid2">
       <div class="field"><label>Client Name</label><input type="text" id="sr-client-ack-name" value="${esc(r.clientAcknowledgment.name || job.customer.name)}"></div>
-      <div class="field"><label>Signature (type full name)</label><input type="text" id="sr-client-ack-signature" value="${esc(r.clientAcknowledgment.signature)}"></div>
-      <div class="field"><label>Date</label><input type="date" id="sr-client-ack-date" value="${esc(r.clientAcknowledgment.date)}"></div>
+      <div class="field"><label>Date</label><input type="date" id="sr-client-ack-date" value="${esc(r.clientAcknowledgment.date||todayISO())}"></div>
+    </div>
+    <div class="field"><label>Customer Signature</label>${sigPadHTML("customer", r.clientAcknowledgment.signature)}</div>
+
+    <div class="sr-section-title">Technician Declaration — Technician Signs Second</div>
+    <div class="small" style="margin-bottom:8px;">I confirm that the inspection and treatment described in this report were carried out in accordance with company procedures and applicable regulations.</div>
+    <div class="grid2">
+      <div class="field"><label>Technician Name</label><input type="text" id="sr-tech-decl-name" value="${esc(r.technicianDeclaration.name || r.technicianName)}"></div>
+      <div class="field"><label>Date</label><input type="date" id="sr-tech-decl-date" value="${esc(r.technicianDeclaration.date||todayISO())}"></div>
+    </div>
+    <div class="field"><label>Technician Signature</label>${sigPadHTML("tech", r.technicianDeclaration.signature)}</div>
+
+    <div class="field" style="margin-top:6px;">
+      <label class="cb-item"><input type="checkbox" id="sr-send-to-customer" ${job.customer.email ? "checked" : "disabled"}> Email the signed PDF report to the customer once both signatures are captured${job.customer.email ? "" : " (add a customer email above to enable)"}</label>
     </div>
 
     <div class="btn-row" style="margin-top:16px;">
-      <button class="btn subtle" id="save-report">Save Report</button>
-      ${job.status!=="Closed" ? `<button class="btn green" id="send-report-email">Email Service Report</button>` : ""}
+      <button class="btn subtle" id="save-report">Save Draft</button>
+      <button class="btn green" id="complete-report">Finish Report &amp; Sign Off</button>
     </div>
-    ${job.reportSentAt ? `<div class="notice green" style="margin-top:10px;">Service report emailed on ${fmtDate(job.reportSentAt)}.</div>` : ""}
+    ${job.reportPdfUrl ? `<div class="notice blue" style="margin-top:10px;">Signed PDF report generated. <a href="${job.reportPdfUrl}" target="_blank" rel="noopener">View / download PDF</a></div>` : ""}
+    ${job.reportSentAt ? `<div class="notice green" style="margin-top:10px;">Service report emailed to the customer on ${fmtDate(job.reportSentAt)}. <button class="btn subtle" id="resend-report-email" style="margin-left:8px;padding:4px 10px;font-size:12px;">Re-send</button></div>` : ""}
   </div>`;
+}
+
+function sigPadHTML(kind, existingDataUrl){
+  const hasSig = !!existingDataUrl;
+  return `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff;">
+    <canvas id="sigpad-${kind}" width="600" height="180" style="width:100%;height:150px;display:block;touch-action:none;cursor:crosshair;"></canvas>
+  </div>
+  <div class="btn-row" style="margin-top:6px;align-items:center;">
+    <button type="button" class="btn subtle" data-clear-sig="${kind}" style="padding:6px 12px;font-size:12px;">Clear Signature</button>
+    <span class="small" id="sigstatus-${kind}">${hasSig ? "Signed ✓" : "Not signed yet"}</span>
+  </div>`;
+}
+
+/* Draws on a canvas via Pointer Events (covers mouse + touch + pen in one
+   listener set) and reports the PNG data URL back through onChange whenever
+   a stroke ends, so the caller can keep it live-synced on job.serviceReport
+   the same way the product rows are — without forcing a re-render that would
+   wipe the canvas mid-signature. */
+function initSignaturePad(canvasId, existingDataUrl, onChange){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas || canvas._sigInit) return;
+  canvas._sigInit = true;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = "#1b2430";
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  let drawing = false;
+
+  if(existingDataUrl){
+    const img = new Image();
+    img.onload = ()=> ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    img.src = existingDataUrl;
+  }
+
+  function pos(e){
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+  }
+  function start(e){
+    e.preventDefault();
+    drawing = true;
+    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+    const p = pos(e);
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+  }
+  function move(e){
+    if(!drawing) return;
+    e.preventDefault();
+    const p = pos(e);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+  }
+  function end(e){
+    if(!drawing) return;
+    drawing = false;
+    onChange(canvas.toDataURL("image/png"), true);
+  }
+  canvas.addEventListener("pointerdown", start);
+  canvas.addEventListener("pointermove", move);
+  canvas.addEventListener("pointerup", end);
+  canvas.addEventListener("pointercancel", end);
+  canvas._clearSig = ()=>{
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    onChange("", false);
+  };
 }
 
 function renderPaymentSection(job, totals){
@@ -699,8 +775,19 @@ function readServiceReportForm(job){
     followUpRequired: radioVal("srFollowUp") || "No",
     followUpDate: val("sr-followup-date"),
     generalComments: val("sr-general-comments"),
-    technicianDeclaration: { name: val("sr-tech-decl-name"), signature: val("sr-tech-decl-signature"), date: val("sr-tech-decl-date") },
-    clientAcknowledgment: { name: val("sr-client-ack-name"), signature: val("sr-client-ack-signature"), date: val("sr-client-ack-date") }
+    // Signatures are drawn on <canvas> pads, not typed — initSignaturePad's
+    // onChange keeps these live on job.serviceReport as strokes are drawn, so
+    // reading them here (rather than a DOM input) always gets the latest ink.
+    technicianDeclaration: {
+      name: val("sr-tech-decl-name"),
+      signature: (job.serviceReport && job.serviceReport.technicianDeclaration && job.serviceReport.technicianDeclaration.signature) || "",
+      date: val("sr-tech-decl-date")
+    },
+    clientAcknowledgment: {
+      name: val("sr-client-ack-name"),
+      signature: (job.serviceReport && job.serviceReport.clientAcknowledgment && job.serviceReport.clientAcknowledgment.signature) || "",
+      date: val("sr-client-ack-date")
+    }
   };
 }
 
@@ -803,6 +890,28 @@ function bindEvents(){
     render();
   });
 
+  // Signature pads: only present once the job has reached the Service Report
+  // section (status Completed/Closed). Wired here (post-render) rather than
+  // via readServiceReportForm's DOM reads, since a <canvas> isn't a form field.
+  const sigJob = state.jobs.find(j=>j.id===ui.openJobId);
+  if(sigJob && document.getElementById("sigpad-customer")){
+    const r = ensureServiceReport(sigJob);
+    initSignaturePad("sigpad-customer", r.clientAcknowledgment.signature, (dataUrl, signed)=>{
+      r.clientAcknowledgment.signature = dataUrl;
+      const st = document.getElementById("sigstatus-customer");
+      if(st) st.textContent = signed ? "Signed ✓" : "Not signed yet";
+    });
+    initSignaturePad("sigpad-tech", r.technicianDeclaration.signature, (dataUrl, signed)=>{
+      r.technicianDeclaration.signature = dataUrl;
+      const st = document.getElementById("sigstatus-tech");
+      if(st) st.textContent = signed ? "Signed ✓" : "Not signed yet";
+    });
+    document.querySelectorAll("[data-clear-sig]").forEach(b=> b.onclick = ()=>{
+      const canvas = document.getElementById("sigpad-"+b.dataset.clearSig);
+      if(canvas && canvas._clearSig) canvas._clearSig();
+    });
+  }
+
   const saveReport = document.getElementById("save-report");
   if(saveReport) saveReport.onclick = async ()=>{
     const job = state.jobs.find(j=>j.id===ui.openJobId);
@@ -810,24 +919,39 @@ function bindEvents(){
     job.serviceReport = report;
     job.completedNotes = report.generalComments || "";
     saveReport.disabled = true; saveReport.textContent = "Saving…";
-    try{ await call("saveServiceReport", job.id, report); showToast("Report saved."); }
+    try{ await call("saveServiceReport", job.id, report); showToast("Draft saved."); }
     catch(err){ alert("Could not save report: "+(err.message||err)); }
     render();
   };
-  const sendReport = document.getElementById("send-report-email");
-  if(sendReport) sendReport.onclick = async ()=>{
+
+  // Finish Report & Sign Off: requires both signatures captured (customer
+  // first, technician second — enforced here, not just in the UI copy),
+  // generates the signed PDF server-side, and emails it to the customer only
+  // if the technician left the "email to customer" checkbox checked.
+  const completeReport = document.getElementById("complete-report");
+  if(completeReport) completeReport.onclick = async ()=>{
     const job = state.jobs.find(j=>j.id===ui.openJobId);
-    if(!job.customer.email){ alert("Add a customer email address to send the report."); return; }
     const report = readServiceReportForm(job);
+    if(!report.clientAcknowledgment.signature){ alert("The customer needs to sign first before the report can be completed."); return; }
+    if(!report.technicianDeclaration.signature){ alert("Please add the technician signature to finish the report."); return; }
     job.serviceReport = report;
     job.completedNotes = report.generalComments || "";
-    sendReport.disabled = true; sendReport.innerHTML = '<span class="spinner"></span> Sending…';
+    const sendBox = document.getElementById("sr-send-to-customer");
+    const sendToCustomer = !!(sendBox && sendBox.checked && !sendBox.disabled);
+    completeReport.disabled = true; completeReport.innerHTML = '<span class="spinner"></span> Completing…';
     try{
-      await call("saveServiceReport", job.id, report);
-      await call("sendReportEmail", job.id);
+      await callPost("completeJobWithReport", [job.id, report, sendToCustomer]);
       await refreshJobs();
-      showToast("Service report emailed.");
-    }catch(err){ alert("Could not send report: "+(err.message||err)); }
+      showToast(sendToCustomer ? "Job completed — signed report emailed to customer." : "Job completed — signed PDF report saved.");
+    }catch(err){ alert("Could not complete the report: "+(err.message||err)); }
+    render();
+  };
+  const resendReport = document.getElementById("resend-report-email");
+  if(resendReport) resendReport.onclick = async ()=>{
+    const job = state.jobs.find(j=>j.id===ui.openJobId);
+    resendReport.disabled = true; resendReport.textContent = "Sending…";
+    try{ await call("sendReportEmail", job.id); await refreshJobs(); showToast("Report re-sent."); }
+    catch(err){ alert("Could not send report: "+(err.message||err)); }
     render();
   };
 

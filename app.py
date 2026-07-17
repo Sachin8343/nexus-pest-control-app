@@ -26,12 +26,14 @@ Required environment variables (set these in your host, never commit them):
   GMAIL_APP_PASSWORD           - 16-character Gmail App Password (not your normal password)
 """
 
+import base64
 import json
 import os
 import re
 import smtplib
 import uuid
 from datetime import datetime, timezone
+from email.mime.application import MIMEApplication
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -106,7 +108,7 @@ JOB_HEADERS = [
     "id", "createdAt", "status", "custName", "custPhone", "custEmail", "custAddress",
     "serviceTypes", "notes", "lineItemsJSON", "completedNotes", "completedAt", "scheduledDate",
     "quoteSentAt", "reportSentAt", "paymentAmount", "paymentMethod", "paymentReceivedAt", "receiptSentAt",
-    "serviceReportJSON",
+    "serviceReportJSON", "reportPdfFileId",
 ]
 PHOTO_HEADERS = ["photoId", "jobId", "fileId", "name", "uploadedAt"]
 
@@ -272,6 +274,10 @@ def get_jobs():
         )
         o["serviceReport"] = json.loads(o["serviceReportJSON"]) if o.get("serviceReportJSON") else None
         o["photos"] = get_photos_for_job(o["id"])
+        o["reportPdfUrl"] = (
+            f"https://drive.google.com/file/d/{o['reportPdfFileId']}/view"
+            if o.get("reportPdfFileId") else None
+        )
         jobs.append(o)
     jobs.sort(key=lambda j: j.get("createdAt") or "", reverse=True)
     return jobs
@@ -287,7 +293,7 @@ def create_job(job):
         customer.get("name", ""), customer.get("phone", ""), customer.get("email", ""), customer.get("address", ""),
         "|".join(job.get("serviceTypes", [])), job.get("notes", ""),
         json.dumps(job.get("lineItems", [])),
-        "", "", "", "", "", "", "", "", "", "",
+        "", "", "", "", "", "", "", "", "", "", "",
     ])
     return job_id
 
@@ -569,6 +575,193 @@ def report_email_html(job, s, cid_names):
     return email_wrapper(body, s)
 
 
+# ---------------- PDF service report (with signatures) ----------------
+def _photo_data_uris(job, limit=6):
+    """Fetch job photos from Drive and return them as base64 data: URIs so the
+    PDF renderer doesn't need to make outbound network requests for images."""
+    uris = []
+    for p in (job.get("photos") or [])[:limit]:
+        try:
+            data = drive().files().get_media(fileId=p["fileId"]).execute()
+            uris.append("data:image/jpeg;base64," + base64.b64encode(data).decode("ascii"))
+        except Exception:
+            pass
+    return uris
+
+
+def report_pdf_html(job, s, photo_data_uris, cust_sig_data_uri, tech_sig_data_uri):
+    """Builds a print-ready HTML document (plain tables/divs only — xhtml2pdf's
+    renderer supports a limited CSS subset, no flexbox/box-shadow) for the
+    signed service report PDF."""
+    r = job.get("serviceReport") or {}
+    table_open = '<table style="width:100%;font-size:11px;border-collapse:collapse;">'
+    table_close = "</table>"
+
+    service_details = (
+        table_open
+        + row_("Property Type", r.get("propertyType"))
+        + row_("Date of Service", fmt_date(r["dateOfService"]) if r.get("dateOfService") else "")
+        + row_("Time In / Out", " – ".join(x for x in [r.get("timeIn"), r.get("timeOut")] if x))
+        + row_("Technician", r.get("technicianName"))
+        + row_("Technician License / Cert. No.", r.get("technicianLicense"))
+        + row_("Type of Service", r.get("serviceTypeOther") if r.get("serviceType") == "Other" else r.get("serviceType"))
+        + table_close
+    )
+    pest_section = (
+        table_open
+        + row_("Pest Identified", r.get("pestType"))
+        + row_("Level of Infestation", r.get("infestationLevel"))
+        + row_("Areas Affected", r.get("areasAffected"))
+        + table_close
+    )
+    evidence = checked_list(r.get("evidence"), {
+        "livePests": "Live pests", "deadPests": "Dead pests", "droppings": "Droppings",
+        "nesting": "Nesting materials", "damage": "Damage to property", "tracks": "Tracks or smear marks",
+    })
+    conditions = checked_list(r.get("contributingConditions"), {
+        "food": "Food sources", "water": "Water/moisture", "clutter": "Clutter",
+        "cracks": "Cracks or gaps", "openings": "Open doors/windows", "sanitation": "Poor sanitation",
+    })
+    observation = table_open + row_("Evidence of Pest Activity", evidence) + row_("Contributing Conditions", conditions) + table_close
+
+    products = [p for p in (r.get("products") or []) if p.get("name")]
+    products_rows = "".join(
+        "<tr>"
+        f'<td style="padding:4px;border-bottom:1px solid #eee;">{esc(p.get("name"))}</td>'
+        f'<td style="padding:4px;border-bottom:1px solid #eee;">{esc(p.get("activeIngredient"))}</td>'
+        f'<td style="padding:4px;border-bottom:1px solid #eee;">{esc(p.get("pcpNumber"))}</td>'
+        f'<td style="padding:4px;border-bottom:1px solid #eee;">{esc(p.get("amountUsed"))}</td>'
+        f'<td style="padding:4px;border-bottom:1px solid #eee;">{esc(p.get("location"))}</td>'
+        "</tr>"
+        for p in products
+    )
+    products_table = (
+        '<table style="width:100%;font-size:10px;border-collapse:collapse;margin-top:5px;">'
+        '<tr><td style="padding:4px;font-weight:bold;border-bottom:1px solid #0c2647;">Product</td>'
+        '<td style="padding:4px;font-weight:bold;border-bottom:1px solid #0c2647;">Active Ingredient</td>'
+        '<td style="padding:4px;font-weight:bold;border-bottom:1px solid #0c2647;">PCP #</td>'
+        '<td style="padding:4px;font-weight:bold;border-bottom:1px solid #0c2647;">Amount</td>'
+        f'<td style="padding:4px;font-weight:bold;border-bottom:1px solid #0c2647;">Location</td></tr>{products_rows}</table>'
+    ) if products_rows else ""
+
+    app_method = checked_list(r.get("applicationMethod"), {
+        "spray": "Spray", "gelBait": "Gel Bait", "dust": "Dust", "baitStation": "Bait Station", "trap": "Trap", "fumigation": "Fumigation",
+    })
+    treatment = (
+        table_open + row_("Treatment Method", r.get("treatmentMethod")) + table_close + products_table + table_open
+        + row_("Target Pest", r.get("targetPest"))
+        + row_("Application Equipment", r.get("applicationEquipment"))
+        + row_("Application Method", app_method)
+        + row_("Areas Treated", r.get("areasTreated"))
+        + table_close
+    )
+    follow_up = (
+        table_open
+        + row_("Recommendations", r.get("recommendations"))
+        + row_("Additional Treatment Required", r.get("followUpRequired"))
+        + row_("Recommended Follow-Up Date", fmt_date(r["followUpDate"]) if r.get("followUpDate") else "")
+        + row_("General Comments", r.get("generalComments") or job.get("completedNotes"))
+        + table_close
+    )
+
+    has_report = bool(job.get("serviceReport"))
+    tech_decl = r.get("technicianDeclaration") or {}
+    client_ack = r.get("clientAcknowledgment") or {}
+
+    photos_html = "".join(
+        f'<img src="{uri}" style="width:130px;height:130px;margin:4px;border:1px solid #ccc;">'
+        for uri in (photo_data_uris or [])
+    )
+
+    def sig_cell(title, sig_uri, name, date):
+        img = (
+            f'<img src="{sig_uri}" style="height:55px;max-width:220px;border-bottom:1px solid #333;">'
+            if sig_uri else '<div style="height:55px;border-bottom:1px solid #333;"></div>'
+        )
+        return (
+            '<td style="width:260px;padding:6px;vertical-align:top;">'
+            f'<div style="font-size:10px;color:#66707d;margin-bottom:4px;">{esc(title)}</div>'
+            + img
+            + f'<div style="font-size:10px;margin-top:4px;">{esc(name or "")}{" — " + fmt_date(date) if date else ""}</div>'
+            "</td>"
+        )
+
+    sig_block = (
+        '<table style="width:100%;margin-top:10px;"><tr>'
+        + sig_cell("Client Acknowledgment (signed first)", cust_sig_data_uri, client_ack.get("name") or job["customer"]["name"], client_ack.get("date"))
+        + sig_cell("Technician Declaration (signed second)", tech_sig_data_uri, tech_decl.get("name") or r.get("technicianName"), tech_decl.get("date"))
+        + "</tr></table>"
+    )
+
+    body = (
+        '<div style="background:#0c2647;padding:14px 18px;">'
+        '<div style="color:#ffffff;font-size:18px;font-weight:bold;">NEXUS PEST CONTROL</div>'
+        '<div style="color:#bcd0ea;font-size:9px;letter-spacing:2px;">PROFESSIONAL PEST MANAGEMENT &mdash; SERVICE REPORT</div></div>'
+        '<div style="padding:16px;">'
+        f'<p style="font-size:12px;">Customer: <strong>{esc(job["customer"]["name"])}</strong><br>'
+        f'Address: {esc(job["customer"]["address"])}<br>'
+        f'Phone: {esc(job["customer"]["phone"])} &nbsp; Email: {esc(job["customer"]["email"])}</p>'
+        + section_heading("Service Details") + service_details
+        + (section_heading("Pest Identified") + pest_section if has_report else "")
+        + (section_heading("Observations") + observation if has_report else "")
+        + (section_heading("Treatment Performed") + treatment if has_report else "")
+        + (section_heading("Recommendations &amp; Follow-Up") + follow_up if has_report else "")
+        + (section_heading("Photographs") + f"<div>{photos_html}</div>" if photos_html else "")
+        + section_heading("Signatures") + sig_block
+        + f'<p style="font-size:9px;color:#8992a0;margin-top:16px;">{esc(s["companyName"])} &bull; {esc(s["address"])} &bull; {esc(s["phone"])} &bull; {esc(s["fromEmail"])}<br>'
+        f'Reminder: if pest activity continues within {s["warrantyDays"]} days of service, contact us for a free re-treatment under our service guarantee.</p>'
+        "</div>"
+    )
+    return f'<html><head><meta charset="utf-8"></head><body style="font-family:Helvetica,Arial,sans-serif;color:#1b2430;">{body}</body></html>'
+
+
+def html_to_pdf_bytes(html):
+    from xhtml2pdf import pisa
+
+    buf = io.BytesIO()
+    result = pisa.CreatePDF(io.StringIO(html), dest=buf)
+    if result.err:
+        raise RuntimeError("PDF generation failed")
+    return buf.getvalue()
+
+
+def generate_and_store_report_pdf(job_id):
+    job = get_job_by_id(job_id)
+    s = get_settings()
+    r = job.get("serviceReport") or {}
+    cust_sig = (r.get("clientAcknowledgment") or {}).get("signature") or ""
+    tech_sig = (r.get("technicianDeclaration") or {}).get("signature") or ""
+    photo_uris = _photo_data_uris(job)
+    html = report_pdf_html(job, s, photo_uris, cust_sig, tech_sig)
+    pdf_bytes = html_to_pdf_bytes(html)
+
+    safe_name = re.sub(r"[^A-Za-z0-9 _-]", "", job["customer"].get("name") or "Customer")
+    date_part = job.get("completedAt") or now_iso()[:10]
+    filename = f"Service Report - {safe_name} - {date_part}.pdf"
+    media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype="application/pdf", resumable=False)
+    file = drive().files().create(
+        body={"name": filename, "parents": [photo_folder_id()]},
+        media_body=media, fields="id",
+    ).execute()
+    file_id = file["id"]
+    drive().permissions().create(fileId=file_id, body={"type": "anyone", "role": "reader"}).execute()
+    set_job_field(job_id, "reportPdfFileId", file_id)
+    return {"fileId": file_id, "url": f"https://drive.google.com/file/d/{file_id}/view"}
+
+
+def complete_job_with_report(job_id, report, send_to_customer):
+    """Saves the signed service report, marks the job completed, generates the
+    signed PDF, and (if the technician chose to) emails it to the customer."""
+    save_service_report(job_id, report)
+    mark_completed(job_id)
+    pdf_info = generate_and_store_report_pdf(job_id)
+    sent = False
+    if send_to_customer:
+        send_report_email(job_id)
+        sent = True
+    return {"pdfUrl": pdf_info["url"], "sent": sent}
+
+
 def receipt_email_html(job, s):
     body = (
         f'<p>Hi {esc(job["customer"]["name"])},</p>'
@@ -584,11 +777,11 @@ def receipt_email_html(job, s):
 
 
 # ---------------- Email sending (Gmail SMTP) ----------------
-def send_email(to, subject, html_body, text_body, cc=None, inline_images=None):
+def send_email(to, subject, html_body, text_body, cc=None, inline_images=None, attachments=None):
     if not GMAIL_APP_PASSWORD:
         raise RuntimeError("GMAIL_APP_PASSWORD env var is not set. See README.md setup steps.")
     s = get_settings()
-    msg = MIMEMultipart("related")
+    msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = formataddr((s["companyName"], GMAIL_ADDRESS))
     msg["To"] = to
@@ -596,16 +789,25 @@ def send_email(to, subject, html_body, text_body, cc=None, inline_images=None):
         msg["Cc"] = cc
     msg["Reply-To"] = s["fromEmail"]
 
+    body_part = MIMEMultipart("related")
     alt = MIMEMultipart("alternative")
     alt.attach(MIMEText(text_body or " ", "plain"))
     alt.attach(MIMEText(html_body, "html"))
-    msg.attach(alt)
+    body_part.attach(alt)
 
     for cid, img_bytes in (inline_images or {}).items():
         img = MIMEImage(img_bytes)
         img.add_header("Content-ID", f"<{cid}>")
         img.add_header("Content-Disposition", "inline", filename=f"{cid}.jpg")
-        msg.attach(img)
+        body_part.attach(img)
+
+    msg.attach(body_part)
+
+    for fname, file_bytes, mimetype in (attachments or []):
+        subtype = (mimetype.split("/")[-1] if mimetype else "pdf")
+        part = MIMEApplication(file_bytes, _subtype=subtype)
+        part.add_header("Content-Disposition", "attachment", filename=fname)
+        msg.attach(part)
 
     recipients = [to] + ([cc] if cc else [])
     with smtplib.SMTP("smtp.gmail.com", 587) as server:
@@ -647,11 +849,29 @@ def send_report_email(job_id):
         except Exception:
             pass
     html = report_email_html(job, s, cid_names)
+
+    # Make sure a signed PDF exists and attach it — this is the record the
+    # customer keeps (with both signatures embedded).
+    attachments = []
+    pdf_file_id = job.get("reportPdfFileId")
+    if not pdf_file_id:
+        try:
+            pdf_info = generate_and_store_report_pdf(job_id)
+            pdf_file_id = pdf_info["fileId"]
+        except Exception:
+            pdf_file_id = None
+    if pdf_file_id:
+        try:
+            pdf_bytes = drive().files().get_media(fileId=pdf_file_id).execute()
+            attachments.append(("Service Report.pdf", pdf_bytes, "application/pdf"))
+        except Exception:
+            pass
+
     send_email(
         to=job["customer"]["email"], cc=s["fromEmail"],
         subject=f'Service Report — {s["companyName"]} — {job["customer"]["address"]}',
         html_body=html, text_body=f'Service complete at {job["customer"]["address"]}. Notes: {job.get("completedNotes", "")}',
-        inline_images=inline_images,
+        inline_images=inline_images, attachments=attachments,
     )
     set_job_field(job_id, "reportSentAt", now_iso())
     return True
@@ -687,6 +907,7 @@ API_FUNCTIONS = {
     "markScheduled": lambda job_id, date_str: mark_scheduled(job_id, date_str),
     "markCompleted": lambda job_id: mark_completed(job_id),
     "saveServiceReport": lambda job_id, report: save_service_report(job_id, report),
+    "completeJobWithReport": lambda job_id, report, send_to_customer: complete_job_with_report(job_id, report, send_to_customer),
     "recordPayment": lambda job_id, amount, method: record_payment(job_id, amount, method),
     "sendQuoteEmail": lambda job_id: send_quote_email(job_id),
     "sendReportEmail": lambda job_id: send_report_email(job_id),

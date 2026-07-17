@@ -3,3 +3,4 @@ gunicorn==22.0.0
 gspread==6.1.2
 google-auth==2.29.0
 google-api-python-client==2.129.0
+xhtml2pdf==0.2.17
