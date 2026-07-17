@@ -866,7 +866,7 @@ class _IPv4SMTP(smtplib.SMTP):
     def _get_socket(self, host, port, timeout):
         addr_info = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
         sock = socket.socket(addr_info[0][0], addr_info[0][1], addr_info[0][2])
-        if timeout is not smtplib._GLOBAL_DEFAULT_TIMEOUT:
+        if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
             sock.settimeout(timeout)
         if self.source_address:
             sock.bind(self.source_address)
