@@ -11,19 +11,19 @@ same data, same free storage - just accessed here via the Google Sheets API
 and Google Drive API (through a service account) instead of being natively
 bound the way an Apps Script project is.
 
-Email is sent via Gmail SMTP with an "app password" for the same
-nexuspestcontrolservice@gmail.com account that used to send through MailApp.
+Email is sent via the Resend HTTP API (not SMTP — Render's free tier blocks
+all outbound SMTP ports, so a normal smtplib/Gmail setup can't work there).
 
 SETUP: see README.md for the exact one-time setup steps (Google Cloud
-service account, sharing the Sheet + Drive folder with it, Gmail app
-password, and deploying this repo to Render).
+service account, sharing the Sheet + Drive folder with it, a Resend account +
+verified sending domain, and deploying this repo to Render).
 
 Required environment variables (set these in your host, never commit them):
   GOOGLE_SERVICE_ACCOUNT_JSON  - full JSON key for the service account (as a single-line string)
   GOOGLE_SHEET_ID              - the spreadsheet ID of "Nexus Pest Control Portal"
   DRIVE_FOLDER_ID              - ID of the Drive folder to store job photos in
-  GMAIL_ADDRESS                - nexuspestcontrolservice@gmail.com
-  GMAIL_APP_PASSWORD           - 16-character Gmail App Password (not your normal password)
+  RESEND_API_KEY               - API key from resend.com
+  RESEND_FROM                  - e.g. "Nexus Pest Control <reports@yourverifieddomain.com>"
 """
 
 import base64
@@ -31,15 +31,10 @@ import gc as gc_module  # aliased: this module already defines a gc() function (
 import json
 import os
 import re
-import smtplib
-import socket
+import urllib.error
+import urllib.request
 import uuid
 from datetime import datetime, timezone
-from email.mime.application import MIMEApplication
-from email.mime.image import MIMEImage
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.utils import formataddr
 from zoneinfo import ZoneInfo
 
 from flask import Flask, Response, jsonify, request, send_from_directory
@@ -52,8 +47,6 @@ import io
 # ---------------- Config ----------------
 GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID", "")
 DRIVE_FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID", "")
-GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "nexuspestcontrolservice@gmail.com")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -853,69 +846,65 @@ def receipt_email_html(job, s):
     return email_wrapper(body, s)
 
 
-# ---------------- Email sending (Gmail SMTP) ----------------
-class _IPv4SMTP(smtplib.SMTP):
-    """Plain smtplib.SMTP resolves smtp.gmail.com via whatever getaddrinfo()
-    returns first, which on Render's free tier is an IPv6 (AAAA) address —
-    but that network has no outbound IPv6 route, so the connection fails
-    immediately with "[Errno 101] Network is unreachable" instead of
-    connecting over IPv4. Forcing AF_INET here fixes that; STARTTLS/cert
-    verification still uses the hostname (self._host), so this doesn't
-    affect TLS at all."""
-
-    def _get_socket(self, host, port, timeout):
-        addr_info = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
-        sock = socket.socket(addr_info[0][0], addr_info[0][1], addr_info[0][2])
-        if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
-            sock.settimeout(timeout)
-        if self.source_address:
-            sock.bind(self.source_address)
-        sock.connect(addr_info[0][4])
-        return sock
+# ---------------- Email sending (Resend HTTP API) ----------------
+# NOTE: this used to send via Gmail SMTP (smtplib), but Render permanently
+# blocks all outbound traffic on SMTP ports (25/465/587) for free web
+# services as an anti-spam measure — no code fix gets around that, it's a
+# network-level block. Resend's API is plain HTTPS (port 443, same as any
+# normal web request), so it isn't affected. See:
+# https://render.com/changelog/free-web-services-will-no-longer-allow-outbound-traffic-to-smtp-ports
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+# "Display Name <address@yourverifieddomain.com>" — the address's domain
+# must be verified in your Resend account (Resend > Domains) before it can
+# send to real customers, not just your own inbox.
+RESEND_FROM = os.environ.get("RESEND_FROM", "")
 
 
 def send_email(to, subject, html_body, text_body, cc=None, inline_images=None, attachments=None):
-    if not GMAIL_APP_PASSWORD:
-        raise RuntimeError("GMAIL_APP_PASSWORD env var is not set. See README.md setup steps.")
+    if not RESEND_API_KEY:
+        raise RuntimeError("RESEND_API_KEY env var is not set. See README.md setup steps.")
+    if not RESEND_FROM:
+        raise RuntimeError("RESEND_FROM env var is not set. See README.md setup steps.")
     s = get_settings()
-    msg = MIMEMultipart("mixed")
-    msg["Subject"] = subject
-    msg["From"] = formataddr((s["companyName"], GMAIL_ADDRESS))
-    msg["To"] = to
-    if cc:
-        msg["Cc"] = cc
-    msg["Reply-To"] = s["fromEmail"]
 
-    body_part = MIMEMultipart("related")
-    alt = MIMEMultipart("alternative")
-    alt.attach(MIMEText(text_body or " ", "plain"))
-    alt.attach(MIMEText(html_body, "html"))
-    body_part.attach(alt)
-
+    payload_attachments = []
     for cid, img_bytes in (inline_images or {}).items():
-        img = MIMEImage(img_bytes)
-        img.add_header("Content-ID", f"<{cid}>")
-        img.add_header("Content-Disposition", "inline", filename=f"{cid}.jpg")
-        body_part.attach(img)
-
-    msg.attach(body_part)
-
+        payload_attachments.append({
+            "filename": f"{cid}.jpg",
+            "content": base64.b64encode(img_bytes).decode("ascii"),
+            "content_id": cid,
+        })
     for fname, file_bytes, mimetype in (attachments or []):
-        subtype = (mimetype.split("/")[-1] if mimetype else "pdf")
-        part = MIMEApplication(file_bytes, _subtype=subtype)
-        part.add_header("Content-Disposition", "attachment", filename=fname)
-        msg.attach(part)
+        payload_attachments.append({
+            "filename": fname,
+            "content": base64.b64encode(file_bytes).decode("ascii"),
+        })
 
-    recipients = [to] + ([cc] if cc else [])
-    # Explicit timeout matters here: smtplib.SMTP() with no timeout can hang
-    # indefinitely on a slow/unreliable outbound connection (observed on
-    # Render's free tier), and gunicorn's default 30s worker timeout would
-    # then SIGKILL the whole worker (logged misleadingly as "out of memory?")
-    # instead of this raising a normal, catchable exception.
-    with _IPv4SMTP("smtp.gmail.com", 587, timeout=20) as server:
-        server.starttls()
-        server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-        server.sendmail(GMAIL_ADDRESS, recipients, msg.as_string())
+    body = {
+        "from": RESEND_FROM,
+        "to": [to],
+        "subject": subject,
+        "html": html_body,
+        "text": text_body or " ",
+        "reply_to": s["fromEmail"],
+    }
+    if cc:
+        body["cc"] = [cc]
+    if payload_attachments:
+        body["attachments"] = payload_attachments
+
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            resp.read()
+    except urllib.error.HTTPError as err:
+        detail = err.read().decode("utf-8", "ignore")
+        raise RuntimeError(f"Resend API error {err.code}: {detail}")
 
 
 # ---------------- Send actions ----------------

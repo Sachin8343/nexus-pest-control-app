@@ -12,7 +12,7 @@ services:
         sync: false
       - key: DRIVE_FOLDER_ID
         sync: false
-      - key: GMAIL_ADDRESS
+      - key: RESEND_API_KEY
         sync: false
-      - key: GMAIL_APP_PASSWORD
+      - key: RESEND_FROM
         sync: false
