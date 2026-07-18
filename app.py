@@ -896,7 +896,15 @@ def send_email(to, subject, html_body, text_body, cc=None, inline_images=None, a
     req = urllib.request.Request(
         "https://api.resend.com/emails",
         data=json.dumps(body).encode("utf-8"),
-        headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+            # Resend's API sits behind Cloudflare, which blocks requests with
+            # Python's default "Python-urllib/x.y" User-Agent as a bot (HTTP
+            # 403, Cloudflare error code 1010). Sending a normal browser-like
+            # UA avoids that block.
+            "User-Agent": "Mozilla/5.0 (compatible; NexusPestControlPortal/1.0)",
+        },
         method="POST",
     )
     try:
